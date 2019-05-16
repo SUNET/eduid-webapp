@@ -31,7 +31,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 import simplejson
-from flask import Blueprint, current_ap
+from flask import Blueprint, current_app
 
 from eduid_webapp.idp.helpers import is_healthy
 
