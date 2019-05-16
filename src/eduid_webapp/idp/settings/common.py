@@ -45,3 +45,45 @@ SECRET_KEY = 'supersecretkey'
 
 # Logging
 LOG_LEVEL = 'DEBUG'
+
+# IdP specific
+SYSLOG_DEBUG = '0'              # '1' for True, '0' for False
+NUM_THREADS = '8'
+LISTEN_ADDR = '0.0.0.0'
+LISTEN_PORT = '8088'
+PYSAML2_CONFIG = 'idp_conf.py'  # path prepended in IdPConfig.__init__()
+FTICKS_SECRET_KEY = None
+FTICKS_FORMAT_STRING = 'F-TICKS/SWAMID/2.0#TS={ts}#RP={rp}#AP={ap}#PN={pn}#AM={am}#'
+STATIC_DIR = None   # directory for local static files
+STATIC_LINK = '#'   # URL to static resources that can be used in templates
+SSL_ADAPTER = 'builtin'  # one of cherrypy.wsgiserver.ssl_adapters
+SERVER_CERT = None  # SSL cert filename
+SERVER_KEY = None   # SSL key filename
+CERT_CHAIN = None   # SSL certificate chain filename, or None
+USERDB_MONGO_DATABASE = 'eduid_am'  # eduid_am for old userdb, eduid_userdb for new
+MONGO_URI = None    # Base mongodb:// URI
+SSO_SESSION_MONGO_URI = None   # mongodb:// URI for SSO session cache
+SSO_SESSION_LIFETIME = '15'  # Lifetime of SSO session in minutes
+RAVEN_DSN = None
+CONTENT_PACKAGES = []  # List of Python packages ("name:path") with content resources
+VERIFY_REQUEST_SIGNATURES = '0'  # '1' for True, '0' for False
+STATUS_TEST_USERNAMES = []
+SIGNUP_LINK = '#'          # for login.html
+DASHBOARD_LINK = '#'       # for forbidden.html
+PASSWORD_RESET_LINK = '#'  # for login.html
+DEFAULT_LANGUAGE = 'en'
+BASE_URL = None
+DEFAULT_EPPN_SCOPE = None
+MAX_AUTHN_FAILURES_PER_MONTH = '50'  # Kantara 30-day bad authn limit is 100
+LOGIN_STATE_TTL = '5'   # time to complete an IdP login, in minutes
+DEFAULT_SCOPED_AFFILIATION = None
+VCCS_URL = 'http://localhost:8550/'  # VCCS backend URL
+INSECURE_COOKIES = '0'  # Set to 1 to not set HTTP Cookie 'secure' flag
+ACTIONS_APP_URI = 'http://actions.example.com/'
+TOU_VERSION = 'version1'
+REDIS_SENTINEL_HOSTS = []
+REDIS_SENTINEL_SERVICE_NAME = None
+REDIS_HOST = None
+REDIS_PORT = '6379'
+REDIS_DB = '0'
+SESSION_APP_KEY = None
