@@ -30,11 +30,3 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-
-
-def is_healthy(self) -> dict:
-    health = {
-            'status': 'STATUS_OK',
-            'reason': 'Nothing tested'
-            }
-    return health

@@ -33,17 +33,5 @@
 import simplejson
 from flask import Blueprint, current_app
 
-from eduid_webapp.idp.helpers import is_healthy
-
 
 idp_views = Blueprint('idp', __name__, url_prefix='')
-
-
-@idp_views.route('/healthy', methods=['GET'])
-def healthy(self):
-    """
-    Check that the backend components we can test cheaply are available.
-    """
-    current_app.logger.debug("Health check request")
-    response = simplejson.dumps(is_healthy())
-    return f"{response}\n"
