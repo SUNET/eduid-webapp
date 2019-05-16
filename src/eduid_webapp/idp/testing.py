@@ -31,7 +31,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 from eduid_common.api.testing import EduidAPITestCase
-from eduid_webapp.actions.app import idp_init_app
+from eduid_webapp.idp.app import idp_init_app
 
 
 class IdpTestCase(EduidAPITestCase):
