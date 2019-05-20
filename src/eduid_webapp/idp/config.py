@@ -31,6 +31,7 @@
 #
 
 import os
+from copy import deepcopy
 from typing import List, Optional
 from six.moves import configparser
 
@@ -69,7 +70,7 @@ class IdPConfig(object):
     def __init__(self, raw_config: Optional[dict]):
         defaults = deepcopy(raw_config)
         self.config = configparser.RawConfigParser(defaults)
-        self._parsed_lists = {}
+        self._parsed_lists: dict = {}
         self.section = _CONFIG_SECTION
 
     def __getitem__(self, key: str, default=None):
@@ -86,15 +87,15 @@ class IdPConfig(object):
             return self._parsed_lists[key]
 
         elif key == 'CONTENT_PACKAGES':
-            if self._parsed_content_packages:
-                return self._parsed_content_packages
+            if key in  self._parsed_lists:
+                return self._parsed_lists[key]
             value = self.config.get(self.section, 'content_packages')
             res = []
             for this in value.split(','):
                 this = this.strip()
                 name, _sep, path, = this.partition(':')
                 res.append((name, path))
-            self._parsed_content_packages = res
+            self._parsed_lists[key] = res
             return res
 
         else:
