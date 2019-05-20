@@ -33,7 +33,6 @@
 from flask import Flask
 
 from eduid_common.api.app import eduid_init_app
-from eduid_webapp.idp.config import IdPConfig
 
 
 def idp_init_app(name: str, config: dict) -> Flask:
@@ -57,8 +56,6 @@ def idp_init_app(name: str, config: dict) -> Flask:
 
     app = eduid_init_app(name, config, app_class=Flask)
     app.config.update(config)
-
-    app.config = IdPConfig(app.config)
 
     from eduid_webapp.idp.views import idp_views
     app.register_blueprint(idp_views)

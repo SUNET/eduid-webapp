@@ -39,13 +39,13 @@ DEVELOPMENT: bool = DEBUG
 REDIS_HOST: Optional[str] = None
 
 # The port of the Redis server (integer).
-REDIS_PORT: str = '6379'
+REDIS_PORT: int = 6379
 
 # The Redis database number (integer).
-REDIS_DB: str = '0'
+REDIS_DB: int = 0
 
 # Redis sentinel hosts, comma separated
-REDIS_SENTINEL_HOSTS: Optional[str] = None
+REDIS_SENTINEL_HOSTS: Optional[List[str]] = None
 
 # The Redis sentinel 'service name'.
 REDIS_SENTINEL_SERVICE_NAME: Optional[str] = None
@@ -62,21 +62,14 @@ LOG_LEVEL: str = 'DEBUG'
 # IdP specific
 SYSLOG_DEBUG: str = '0'              # '1' for True, '0' for False
 
-# Number of worker threads to start (integer).
-# EduID IdP spawns multiple threads to make use of all CPU cores in the password
-# pre-hash function.
-# Number of threads should probably be about 2x number of cores to 4x number of
-# cores (if hyperthreading is available).
-NUM_THREADS: str = '8'
-
 # IP address to listen on.
 LISTEN_ADDR: str = '0.0.0.0'
 
 # The port the IdP authentication should listen on (integer).
-LISTEN_PORT: str = '8088'
+LISTEN_PORT: int = 8088
 
 # pysaml2 configuration file. Separate config file with SAML related parameters.
-PYSAML2_CONFIG: str = 'idp_conf.py'  # path prepended in IdPConfig.__init__()
+PYSAML2_CONFIG: str = 'idp_conf.py'
 
 # SAML F-TICKS user anonymization key. If this is set, the IdP will log FTICKS data
 # on every login.
@@ -84,13 +77,6 @@ FTICKS_SECRET_KEY: Optional[str] = None
 
 # Get SAML F-TICKS format string.
 FTICKS_FORMAT_STRING: str = 'F-TICKS/SWAMID/2.0#TS={ts}#RP={rp}#AP={ap}#PN={pn}#AM={am}#'
-
-# Directory with static files to be served.
-STATIC_DIR: Optional[str] = None   # directory for local static files
-STATIC_LINK: str = '#'   # URL to static resources that can be used in templates
-
-# CherryPy SSL adapter class to use (must be one of cherrypy.wsgiserver.ssl_adapters)
-SSL_ADAPTER: str = 'builtin'  # one of cherrypy.wsgiserver.ssl_adapters
 
 # SSL certificate filename (None == SSL disabled)
 SERVER_CERT: Optional[str] = None  # SSL cert filename
@@ -116,24 +102,19 @@ SSO_SESSION_MONGO_URI: Optional[str] = None   # mongodb:// URI for SSO session c
 # ForceAuthn).
 # The total time a user can access a particular SP would therefor be
 # this value, plus the pysaml2 lifetime of the assertion.
-SSO_SESSION_LIFETIME: str = '15'  # Lifetime of SSO session in minutes
+SSO_SESSION_LIFETIME: int = 15  # Lifetime of SSO session in minutes
 
 # Raven DSN (string) for logging exceptions to Sentry.
 RAVEN_DSN: Optional[str] = None
 
-# Get list of tuples with packages and paths to content resources, such as login.html.
-# The expected format in the INI file is
-#     content_packages = pkg1:some/path/, pkg2:foo
-CONTENT_PACKAGES: Optional[str] = None  # List of Python packages ("name:path") with content resources
-
 # Verify request signatures, if they exist.
 # This defaults to False since it is a trivial DoS to consume all the IdP:s
 # CPU resources if this is set to True.
-VERIFY_REQUEST_SIGNATURES: str = '0'  # '1' for True, '0' for False
+VERIFY_REQUEST_SIGNATURES: bool = False
 
 # Get list of usernames valid for use with the /status URL.
 # If this list is ['*'], all usernames are allowed for /status.
-STATUS_TEST_USERNAMES: Optional[str] = None
+STATUS_TEST_USERNAMES: Optional[List[str]] = None
 
 # URL (string) for use in simple templating of login.html.
 SIGNUP_LINK: str = '#'          # for login.html
@@ -164,13 +145,13 @@ DEFAULT_EPPN_SCOPE: Optional[str] = None
 
 # Disallow login for a user after N failures in a given month.
 # This is said to be an imminent Kantara requirement.
-MAX_AUTHN_FAILURES_PER_MONTH: str = '50'  # Kantara 30-day bad authn limit is 100
+MAX_AUTHN_FAILURES_PER_MONTH: int = 50  # Kantara 30-day bad authn limit is 100
 
 # Lifetime of state kept in IdP login phase.
 # This is the time, in minutes, a user has to complete the login phase.
 # After this time, login cannot complete because the SAMLRequest, RelayState
 # and possibly other needed information will be forgotten.
-LOGIN_STATE_TTL: str = '5'   # time to complete an IdP login, in minutes
+LOGIN_STATE_TTL: int = 5   # time to complete an IdP login, in minutes
 
 # Add a default eduPersonScopedAffiliation if none is returned from the
 # attribute manager.
@@ -181,14 +162,11 @@ DEFAULT_SCOPED_AFFILIATION: Optional[str] = None
 # using TLS.
 VCCS_URL: str = 'http://localhost:8550/'  # VCCS backend URL
 
-# Set to True to NOT set HTTP Cookie 'secure' flag (boolean).
-INSECURE_COOKIES: str = '0'  # Set to 1 to not set HTTP Cookie 'secure' flag
-
 # URI of the actions app.
 ACTIONS_APP_URI: Optional[str] = 'http://actions.example.com/'
 
 # The plugins for pre-authentication actions that need to be loaded
-ACTION_PLUGINS: Optional[str] = None
+ACTION_PLUGINS: Optional[List[str]] = None
 
 # The current version of the terms of use agreement.
 TOU_VERSION: str = 'version1'
@@ -200,4 +178,4 @@ SHARED_SESSION_COOKIE_NAME: str = 'sessid'
 SHARED_SESSION_SECRET_KEY: Optional[str] = None
 
 # TTL for shared sessions.
-SHARED_SESSION_TTL: str = '300'
+SHARED_SESSION_TTL: int = 300
