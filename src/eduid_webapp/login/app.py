@@ -20,7 +20,7 @@ class LoginApp(EduIDApp):
         self.config = LoginConfig(**config)
         # Init dbs
         self.sso_sessions = SSOSessionCacheMDB(uri=self.config.mongo_uri, logger=self.logger.getChild('sso_sessions'),
-                                               ttl=app.config.sso_permanent_session_lifetime * 60)
+                                               ttl=self.config.sso_permanent_session_lifetime * 60)
         # Init translations
         translation.init_babel(self)
         # Init authn

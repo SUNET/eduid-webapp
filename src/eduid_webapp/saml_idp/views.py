@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime, timedelta
+from typing import Optional
 from uuid import uuid4
-from flask import Blueprint, request, redirect, url_for
+from flask import Blueprint, request, redirect, url_for, make_response
 from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+from werkzeug.exceptions import BadRequest
 
 from eduid_common.api.utils import urlappend
+from eduid_common.authn.assurance import WrongMultiFactor, MissingMultiFactor, AssuranceException
 from eduid_common.session import session
 from eduid_common.session.namespaces import SamlRequestInfo, LoginRequest
-from eduid_common.authn.idp_saml import parse_saml_request
+from eduid_common.authn.idp_saml import parse_saml_request, IdP_SAMLRequest
 from eduid_webapp.saml_idp.app import current_idp_app as current_app
 
-__author__ = 'lundberg'
+from eduid_webapp.saml_idp import kantara, fticks
 
-from eduid_webapp.saml_idp.misc import get_login_response_authn
+from eduid_webapp.saml_idp.misc import get_login_response_authn, get_saml_request, make_saml_response
+
+__author__ = 'lundberg'
 
 idp_views = Blueprint('idp', __name__, url_prefix='', template_folder='templates')
 
@@ -32,16 +37,8 @@ def sso_redirect():
         relay_state=request.args.get('RelayState'),
         binding=BINDING_HTTP_REDIRECT,
     )
-    request_args = {
-        'SAMLRequest': saml_request_info.saml_request,
-        'RelayState': saml_request_info.relay_state,
-        'SigAlg': request.args.get('SigAlg'),
-        'Signature': request.args.get('Signature')
-    }
-    current_app.logger.debug(f'request args: {request_args}')
-    parsed_saml_request = parse_saml_request(request_params=request_args, binding=saml_request_info.binding,
-                                             idp=current_app.saml2_server, logger=current_app.logger,
-                                             debug=current_app.debug)
+    parsed_saml_request = get_saml_request(saml_request_info, request.args.get('SigAlg'),
+                                           request.args.get('Signature'))
 
     current_app.logger.debug(f'REQ_INFO: {parsed_saml_request._req_info}')
     # TODO: Check for SSO cookie
@@ -71,25 +68,54 @@ def sso_post():
 
 @idp_views.route('/return/<request_id>', methods=['GET'])
 def return_url(request_id):
-    saml_request = session.saml_idp.requests.get(request_id)
-    if not saml_request:
+    saml_request_info = session.saml_idp.requests.get(request_id)
+    login_response = session.login.responses.get(request_id)
+    sso_session = current_app.sso_sessions.get_session(sid=login_response.sso_session_id.encode())
+    if saml_request_info is None or login_response is None:
         return 'Login timeout, please try again'
-    user = current_app.
-    response_authn = get_login_response_authn(saml_request, user)
+    saml_request = get_saml_request(saml_request_info=saml_request_info)
+    user = current_app.central_userdb.get_user_by_eppn(session.common.eppn)
+    try:
+        response_authn = get_login_response_authn(saml_request, user, login_response)
+    except WrongMultiFactor as exc:
+        current_app.logger.info('Assurance not possible: {!r}'.format(exc))
+        return 'SWAMID_MFA_REQUIRED'
+    except MissingMultiFactor as exc:
+        current_app.logger.info('Assurance not possible: {!r}'.format(exc))
+        return 'MFA_REQUIRED'
+    except AssuranceException as exc:
+        current_app.logger.info('Assurance not possible: {!r}'.format(exc))
+        return 'Login failed, please try again'
 
-    saml_response = self._make_saml_response(response_authn, resp_args, user, ticket, self.sso_session)
+    try:
+        resp_args = saml_request.get_response_args(bad_request=BadRequest)
+    except BadRequest as exc:
+        current_app.logger.info('Bad request: {!r}'.format(exc))
+        return f'Bad request: {exc.description}'
 
+    saml_response = make_saml_response(response_authn, resp_args, user, saml_request, sso_session)
     binding_out = resp_args['binding_out']
     destination = resp_args['destination']
-    http_args = ticket.saml_req.apply_binding(resp_args, ticket.RelayState, str(saml_response))
+    http_args = saml_request.apply_binding(resp_args, saml_request_info.relay_state, saml_response)
 
+    kantara.log_assertion_id(saml_response, request_id, login_response.sso_session_id)
     # INFO-Log the SSO session id and the AL and destination
-    self.logger.info('{!s}: response authn={!s}, dst={!s}'.format(ticket.key,
-                                                                  response_authn,
-                                                                  destination))
-    self._fticks_log(relying_party=resp_args.get('sp_entity_id', destination),
-                     authn_method=response_authn.class_ref,
-                     user_id=str(user.user_id),
-                     )
+    current_app.logger.info(f'{request_id}: response authn={response_authn}, dst={destination}')
+    fticks.log(hmac_key=current_app.config.fticks_secret_key,
+               entity_id=current_app.saml2_server.config.entityid,
+               relying_party=resp_args.get('sp_entity_id', destination),
+               authn_method=response_authn.class_ref,
+               user_id=str(user.user_id),
+               )
 
-    return eduid_idp.mischttp.create_html_response(binding_out, http_args, self.start_response, self.logger)
+    if binding_out == BINDING_HTTP_REDIRECT:
+        for header in http_args["headers"]:
+            if header[0] == "Location":
+                resp = redirect(header[1])
+    if binding_out == BINDING_HTTP_POST:
+        resp = make_response(http_args['data'])
+        resp.headers = http_args['headers']
+        return resp
+
+    current_app.logger.error(f'Unknown binding: {binding_out}')
+    return f'Unknown binding: {binding_out}'

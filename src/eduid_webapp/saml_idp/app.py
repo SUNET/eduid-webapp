@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
-from flask import current_app, Flask
+from flask import current_app
 from saml2.server import Server as Saml2Server
 
-from eduid_common.api.app import get_app_config
+from eduid_common.api.app import get_app_config, EduIDApp
 from eduid_common.session.sso_cache import SSOSessionCacheMDB
 from eduid_userdb.actions import ActionDB
 from eduid_webapp.saml_idp.settings.common import IdpConfig
@@ -11,7 +11,7 @@ from eduid_webapp.saml_idp.settings.common import IdpConfig
 __author__ = 'lundberg'
 
 
-class SAMLIdpApp(Flask):
+class SAMLIdpApp(EduIDApp):
 
     def __init__(self, name, config):
         config = get_app_config(name, config)

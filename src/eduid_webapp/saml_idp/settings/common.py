@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Optional
 
 from eduid_common.config.base import FlaskConfig
 
@@ -16,6 +16,6 @@ class IdpConfig(FlaskConfig):
     pysaml2_config: Mapping = field(default_factory=dict)
     login_uri: str = '/login/'
     sso_permanent_session_lifetime: int = 600
-
-
-
+    default_eppn_scope: Optional[str] = 'eduid.se'
+    default_scoped_affiliation: Optional[str] = 'affiliate@eduid.se'
+    fticks_secret_key: Optional[str] = None

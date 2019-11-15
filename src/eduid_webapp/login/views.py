@@ -7,6 +7,7 @@ from eduid_common.api.decorators import require_user, MarshalWith, UnmarshalWith
 from eduid_common.api.exceptions import EduidTooManyRequests, EduidForbidden
 from eduid_common.authn.idp_authn import AuthnData
 from eduid_common.session import session
+from eduid_common.session.namespaces import LoginResponse
 from eduid_common.session.sso_session import SSOSession
 from eduid_userdb import User
 from eduid_webapp.login.app import current_login_app as current_app
@@ -48,6 +49,8 @@ def login(request_id):
                                            f' The service might have requested a "confirmed" identity.'
                                            f'Visit the eduID dashboard to confirm your identity.')
 
+        #TODO: Split here
+
         login_request = session.login.requests.get(request_id)
         if not login_request:
             return render_template('error.jinja2', heading='Login timeout',
@@ -58,6 +61,9 @@ def login(request_id):
         sso_session_id = _create_sso_session(authninfo)
         res = redirect(login_request.return_endpoint_url)
         set_cookie(config=current_app.config, response=res, value=sso_session_id)
+        session.login.responses[request_id] = LoginResponse(expires_at=login_request.expires_at,
+                                                            sso_session_id=sso_session_id)
+
         # Now that an SSO session has been created, redirect the users browser back to
         # the return url of the calling interface.
         current_app.logger.debug(f'Redirect => {session.login.return_endpoint_url}')
