@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<form class="form-horizontal well well-large" action='{{ url_for('login.login', request_id) }}' method="POST">
+    <fieldset>
+        <legend class="">{{ _("eduID login") }}</legend>
+
+        <div class="col-md-offset-3 col-md-6">
+            {{ error_message }}
+            <div class="control-group">
+                <!-- Username -->
+                <label class="control-label" for="username">{{ _("Email :") }}</label>
+                <div class="controls">
+                    <div class="input-append">
+                        <input type="text" id="username" name="username" value="{username!s}" placeholder=""
+                               class="input-large" autofocus="autofocus">
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <!-- Password-->
+                <label class="control-label" for="password">{{ _("Password :") }}</label>
+                <div class="controls">
+                    <div class="input-append">
+                        <input type="password" id="password" name="password" placeholder="" class="input-large">
+                    </div>
+                </div>
+                <p></p>
+                <a class="forgot-password"
+                   href="{{ password_reset_link }}">{{ _("Forgot your password?") }}</a>
+            </div>
+
+            <div class="form-actions">
+                <!-- Button -->
+                <span>
+                <button class="btn btn-primary btn-large">{{ _("Sign in") }}</button>
+                </span>
+                <span>
+                <a class="btn btn-warning btn-large" href="{{ signup_link }}" target="_blank">{{ _("Sign up") }}</a>
+                </span>
+            </div>
+
+        </div>
+    </fieldset>
+</form>
+</body>
+</html>
