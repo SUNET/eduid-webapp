@@ -45,7 +45,8 @@ def get_requested_authn_context(saml_req: IdP_SAMLRequest) -> Optional[str]:
     return res
 
 
-def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_response: LoginResponse) -> AuthnInfo:
+def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_response: LoginResponse,
+                             sso_session: SSOSession) -> AuthnInfo:
     """
     Figure out what AuthnContext to assert in the SAML response.
 
@@ -56,11 +57,12 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
     :param saml_request: State for this request
     :param user: The user for whom the assertion will be made
     :param login_response: Data from the login app
+    :param sso_session: Users SSO session
     :return: Authn information
     """
     current_app.logger.debug(f'MFA credentials logged in the ticket: {login_response.mfa_action_creds}')
     current_app.logger.debug(f'External MFA credential logged in the ticket: {login_response.mfa_action_external}')
-    current_app.logger.debug(f'Credentials used in this SSO session:\n{current_app.sso_session.authn_credentials}')
+    current_app.logger.debug(f'Credentials used in this SSO session:\n{sso_session.authn_credentials}')
     current_app.logger.debug(f'User credentials:\n{user.credentials.to_list()}')
 
     # Decide what AuthnContext to assert based on the one requested in the request
@@ -68,7 +70,7 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
 
     req_authn_context = get_requested_authn_context(saml_request)
 
-    resp_authn = assurance.response_authn(req_authn_context, user, current_app.sso_session, current_app.logger)
+    resp_authn = assurance.response_authn(req_authn_context, user, sso_session, current_app.logger)
 
     current_app.logger.debug("Response Authn context class: {!r}".format(resp_authn))
 
@@ -79,7 +81,7 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
         current_app.logger.debug("Asserting AuthnContext {!r} (none requested)".format(resp_authn))
 
     # Augment the AuthnInfo with the authn_timestamp before returning it
-    return replace(resp_authn, instant=current_app.sso_session.authn_timestamp)
+    return replace(resp_authn, instant=sso_session.authn_timestamp)
 
 
 def make_saml_response(authn_info: AuthnInfo, resp_args: ResponseArgs, user: User,

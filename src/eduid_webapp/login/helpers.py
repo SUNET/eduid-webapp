@@ -9,8 +9,6 @@ __author__ = 'lundberg'
 def set_cookie(config: LoginConfig, response: Response, value: str) -> None:
     """
     Set the SSO session cookie.
-
-    :param response: the response object to carry the cookie
     """
     cookie_name = config.get('sso_session_cookie_name')
     max_age = int(config.get('sso_permanent_session_lifetime'))

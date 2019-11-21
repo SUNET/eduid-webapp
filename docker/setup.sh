@@ -8,6 +8,7 @@ set -x
 
 apt-get update
 apt-get -y install \
+    build-essential \
     libffi-dev \
     libtiff5-dev \
     libjpeg62-turbo-dev \
@@ -17,7 +18,8 @@ apt-get -y install \
     libxml2-dev \
     libxslt1-dev \
     xmlsec1 \
-    libxml2-utils
+    libxml2-utils \
+    swig
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*

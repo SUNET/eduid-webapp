@@ -50,7 +50,7 @@ def sso_redirect():
 
     session.login.requests[request_id] = LoginRequest(
         # TODO: mfa
-        return_endpoint_url=url_for('idp.return_url', request_id=request_id),
+        return_endpoint_url=url_for('idp.return_url', request_id=request_id, _external=True),
         expires_at=datetime.utcnow() + timedelta(seconds=300),  # TODO: Use expire time from SAML request
     )
 
@@ -70,13 +70,13 @@ def sso_post():
 def return_url(request_id):
     saml_request_info = session.saml_idp.requests.get(request_id)
     login_response = session.login.responses.get(request_id)
-    sso_session = current_app.sso_sessions.get_session(sid=login_response.sso_session_id.encode())
+    sso_session = current_app.sso_sessions.get_session(sid=login_response.sso_session_id.encode(), return_object=True)
     if saml_request_info is None or login_response is None:
         return 'Login timeout, please try again'
     saml_request = get_saml_request(saml_request_info=saml_request_info)
     user = current_app.central_userdb.get_user_by_eppn(session.common.eppn)
     try:
-        response_authn = get_login_response_authn(saml_request, user, login_response)
+        response_authn = get_login_response_authn(saml_request, user, login_response, sso_session)
     except WrongMultiFactor as exc:
         current_app.logger.info('Assurance not possible: {!r}'.format(exc))
         return 'SWAMID_MFA_REQUIRED'
@@ -88,7 +88,7 @@ def return_url(request_id):
         return 'Login failed, please try again'
 
     try:
-        resp_args = saml_request.get_response_args(bad_request=BadRequest)
+        resp_args = saml_request.get_response_args(bad_request=BadRequest, key=request_id)
     except BadRequest as exc:
         current_app.logger.info('Bad request: {!r}'.format(exc))
         return f'Bad request: {exc.description}'
@@ -111,10 +111,10 @@ def return_url(request_id):
     if binding_out == BINDING_HTTP_REDIRECT:
         for header in http_args["headers"]:
             if header[0] == "Location":
-                resp = redirect(header[1])
+                resp = redirect(header[1], Response=current_app.response_class)
     if binding_out == BINDING_HTTP_POST:
         resp = make_response(http_args['data'])
-        resp.headers = http_args['headers']
+        resp.headers.extend(http_args['headers'])
         return resp
 
     current_app.logger.error(f'Unknown binding: {binding_out}')
