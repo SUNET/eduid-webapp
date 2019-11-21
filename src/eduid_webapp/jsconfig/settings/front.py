@@ -53,9 +53,6 @@ class FrontConfig:
             })
     # URLs
     static_faq_url: str = ''
-    static_staff_url: str = ''
-    static_students_url: str = ''
-    static_technicians_url: str = ''
     reset_passwd_url: str = ''
     dashboard_url: str = ''
     personal_data_url: str = '/personal-data/user'
@@ -68,7 +65,7 @@ class FrontConfig:
     token_service_url: str = '/services/authn/'
     oidc_proofing_freja_url: str = '/services/oidc-proofing/freja/proofing/'
     orcid_url: str = '/services/orcid/'
-    eidas_url: str = 'https://eidas.eduid.local.emergya.info'
+    eidas_url: str = 'http://eidas.eduid.docker:8080/'
     token_verify_idp: str = 'http://dev.test.swedenconnect.se/idp'
     # changing password
     password_length: int = 12
@@ -84,3 +81,4 @@ class FrontConfig:
     recaptcha_public_key: str = '6Lf5rCETAAAAAAW6UP4o59VSNEWG7RrzY_b5uH_M'
     # This key is for signup.eduid.local.emergya.info
     # recaptcha_public_key: str = '6Ld2IUwUAAAAAD5saiXoQKgmUC9JhQLqcHZoemTh'
+    sentry_dsn: str = ''
