@@ -34,40 +34,41 @@
 from typing import cast
 from flask import current_app
 
+from eduid_userdb.security import PasswordResetStateDB
 from eduid_common.api.app import get_app_config
 from eduid_common.api import mail_relay
 from eduid_common.api import am, msg
 from eduid_common.authn.middleware import AuthnApp
-from eduid_webapp.{{cookiecutter.directory_name}}.settings.common import {{cookiecutter.class_name}}Config
+from eduid_webapp.reset_password.settings.common import ResetPasswordConfig
 
-__author__ = '{{cookiecutter.author}}'
+__author__ = 'eperez'
 
 
-class {{cookiecutter.class_name}}App(AuthnApp):
+class ResetPasswordApp(AuthnApp):
 
     def __init__(self, name, config):
         # Init config for common setup
         config = get_app_config(name, config)
-        super({{cookiecutter.class_name}}App, self).__init__(name, config)
+        super(ResetPasswordApp, self).__init__(name, config)
         # Init app config
-        self.config = {{cookiecutter.class_name}}Config(**config)
+        self.config = ResetPasswordConfig(**config)
         # Init dbs
-        self.private_userdb = {{cookiecutter.class_name}}UserDB(self.config.mongo_uri)
+        self.private_userdb = PasswordResetStateDB(self.config.mongo_uri)
         # Init celery
         msg.init_relay(self)
-        am.init_relay(self, 'eduid_{{cookiecutter.directory_name}}')
+        am.init_relay(self, 'eduid_reset_password')
         # Initiate external modules
 
 
-def get_current_app() -> {{cookiecutter.class_name}}App:
-    """Teach pycharm about {{cookiecutter.class_name}}App"""
+def get_current_app() -> ResetPasswordApp:
+    """Teach pycharm about ResetPasswordApp"""
     return current_app  # type: ignore
 
 
-current_{{cookiecutter.directory_name}}_app = get_current_app()
+current_reset_password_app = get_current_app()
 
 
-def init_{{cookiecutter.directory_name}}_app(name: str, config: dict) -> {{cookiecutter.class_name}}App:
+def init_reset_password_app(name: str, config: dict) -> ResetPasswordApp:
     """
     :param name: The name of the instance, it will affect the configuration loaded.
     :param config: any additional configuration settings. Specially useful
@@ -75,11 +76,11 @@ def init_{{cookiecutter.directory_name}}_app(name: str, config: dict) -> {{cooki
 
     :return: the flask app
     """
-    app = {{cookiecutter.class_name}}App(name, config)
+    app = ResetPasswordApp(name, config)
 
     # Register views
-    from eduid_webapp.{{cookiecutter.directory_name}}.views import {{cookiecutter.directory_name}}_views
-    app.register_blueprint({{cookiecutter.directory_name}}_views, url_prefix=app.config.application_root)
+    from eduid_webapp.reset_password.views import reset_password_views
+    app.register_blueprint(reset_password_views, url_prefix=app.config.application_root)
 
     app.logger.info('{!s} initialized'.format(name))
     return app

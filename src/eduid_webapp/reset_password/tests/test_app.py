@@ -34,34 +34,34 @@
 from __future__ import absolute_import
 
 from eduid_common.api.testing import EduidAPITestCase
-from eduid_webapp.{{cookiecutter.directory_name}}.app import init_{{cookiecutter.directory_name}}_app
-from eduid_webapp.{{cookiecutter.directory_name}}.settings.common import {{cookiecutter.class_name}}Config
+from eduid_webapp.reset_password.app import init_reset_password_app
+from eduid_webapp.reset_password.settings.common import ResetPasswordConfig
 
-__author__ = '{{cookiecutter.author}}'
+__author__ = 'eperez'
 
 
-class {{cookiecutter.class_name}}Tests(EduidAPITestCase):
+class ResetPasswordTests(EduidAPITestCase):
     """Base TestCase for those tests that need a full environment setup"""
 
     def setUp(self):
-        super({{cookiecutter.class_name}}Tests, self).setUp()
+        super(ResetPasswordTests, self).setUp()
 
     def load_app(self, config):
         """
         Called from the parent class, so we can provide the appropriate flask
         app for this test case.
         """
-        return init_{{cookiecutter.directory_name}}_app('testing', config)
+        return init_reset_password_app('testing', config)
 
     def update_config(self, config):
         config.update({
-            })
-        return {{cookiecutter.class_name}}Config(**config)
+        })
+        return ResetPasswordConfig(**config)
 
     def tearDown(self):
-        super({{cookiecutter.class_name}}Tests, self).tearDown()
+        super(ResetPasswordTests, self).tearDown()
         with self.app.app_context():
             self.app.central_userdb._drop_whole_collection()
 
     def test_app_starts(self):
-        self.assertEquals(self.app.config.app_name, "{{cookiecutter.directory_name}}")
+        self.assertEquals(self.app.config.app_name, "reset_password") 
