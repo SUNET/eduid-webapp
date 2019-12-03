@@ -14,7 +14,8 @@ class IdpConfig(FlaskConfig):
     Configuration for the idp app
     """
     pysaml2_config: Mapping = field(default_factory=dict)
-    login_uri: str = '/login/'
+    login_service_uri: str = '/login/'
+    sso_session_cookie_name: str = 'idpauthn'
     sso_permanent_session_lifetime: int = 600
     default_eppn_scope: Optional[str] = 'eduid.se'
     default_scoped_affiliation: Optional[str] = 'affiliate@eduid.se'

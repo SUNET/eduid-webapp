@@ -15,20 +15,14 @@ from eduid_webapp.saml_idp.app import current_idp_app as current_app
 
 from eduid_webapp.saml_idp import kantara, fticks
 
-from eduid_webapp.saml_idp.misc import get_login_response_authn, get_saml_request, make_saml_response
+from eduid_webapp.saml_idp.saml_helpers import get_login_response_authn, get_saml_request, make_saml_response
 
 __author__ = 'lundberg'
 
-idp_views = Blueprint('idp', __name__, url_prefix='', template_folder='templates')
+sso_views = Blueprint('sso', __name__, url_prefix='/sso', template_folder='templates')
 
 
-@idp_views.route('/', methods=['GET'])
-def index():
-    # TODO: Redirect to landing page?
-    return "hello idp"
-
-
-@idp_views.route('/sso/redirect', methods=['GET'])
+@sso_views.route('/redirect', methods=['GET'])
 def sso_redirect():
     current_app.logger.debug('--- SSO ---')
     current_app.logger.debug(f'{request.method}: {request.path}')
@@ -40,33 +34,44 @@ def sso_redirect():
     parsed_saml_request = get_saml_request(saml_request_info, request.args.get('SigAlg'),
                                            request.args.get('Signature'))
 
-    current_app.logger.debug(f'REQ_INFO: {parsed_saml_request._req_info}')
-    # TODO: Check for SSO cookie
-    # TODO: Check which AuthnContext the SP expects
-
-    # We don't know who is trying to log in
     request_id = str(uuid4())
     session.saml_idp.requests[request_id] = saml_request_info
+    current_app.logger.debug(f'REQ_INFO: {parsed_saml_request._req_info}')
+
+    # Check for SSO cookie
+    current_app.logger.debug(f'request.cookies: {request.cookies}')
+    if 'idpauthn' in request.cookies:
+        sso_session_id = bytes(request.cookies['idpauthn'], encoding='utf8')
+        sso_session = current_app.sso_sessions.get_session(sid=sso_session_id, return_object=True)
+        current_app.logger.debug(f'sso_session: {sso_session}')
+
+
+
+
+    # TODO: Check which AuthnContext the SP expects
+
+    # We don't know who is trying to log in, the SSO session has wrong AuthnContext or force authn is true
+
 
     session.login.requests[request_id] = LoginRequest(
         # TODO: mfa
-        return_endpoint_url=url_for('idp.return_url', request_id=request_id, _external=True),
+        return_endpoint_url=url_for('sso.return_url', request_id=request_id, _external=True),
         expires_at=datetime.utcnow() + timedelta(seconds=300),  # TODO: Use expire time from SAML request
     )
 
-    login_uri = urlappend(current_app.config.login_uri, request_id)
-    current_app.logger.info("Redirecting user to login app {!s}".format(login_uri))
-    return redirect(login_uri)
+    login_service_uri = urlappend(current_app.config.login_service_uri, request_id)
+    current_app.logger.info("Redirecting user to login service {!s}".format(login_service_uri))
+    return redirect(login_service_uri)
 
 
-@idp_views.route('/sso/post', methods=['POST'])
+@sso_views.route('/post', methods=['POST'])
 def sso_post():
     # TODO
     binding = BINDING_HTTP_POST
     return 'Not implemented'
 
 
-@idp_views.route('/return/<request_id>', methods=['GET'])
+@sso_views.route('/return/<request_id>', methods=['GET'])
 def return_url(request_id):
     saml_request_info = session.saml_idp.requests.get(request_id)
     login_response = session.login.responses.get(request_id)

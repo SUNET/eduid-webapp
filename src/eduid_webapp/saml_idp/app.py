@@ -4,6 +4,7 @@ from flask import current_app
 from saml2.server import Server as Saml2Server
 
 from eduid_common.api.app import get_app_config, EduIDApp
+from eduid_common.api.debug import log_app_routes
 from eduid_common.session.sso_cache import SSOSessionCacheMDB
 from eduid_userdb.actions import ActionDB
 from eduid_webapp.saml_idp.settings.common import IdpConfig
@@ -46,8 +47,15 @@ def init_idp_app(name: str, config: dict = None) -> SAMLIdpApp:
     app = SAMLIdpApp(name, config)
 
     # Register views
-    from eduid_webapp.saml_idp.views import idp_views
-    app.register_blueprint(idp_views, url_prefix=app.config.application_root)
+    from eduid_webapp.saml_idp.views.root import root_views
+    from eduid_webapp.saml_idp.views.sso import sso_views
+    from eduid_webapp.saml_idp.views.slo import slo_views
+    app.register_blueprint(root_views)
+    app.register_blueprint(sso_views)
+    app.register_blueprint(slo_views)
+
+    if app.debug:
+        log_app_routes(app)
 
     app.logger.info('{!s} initialized'.format(name))
     return app
