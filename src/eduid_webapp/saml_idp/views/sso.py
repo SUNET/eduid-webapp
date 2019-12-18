@@ -109,7 +109,4 @@ def return_url(request_id):
     else:
         current_app.logger.error(f'Unknown binding: {binding_out}')
         return f'Unknown binding: {binding_out}'
-    # Create SSO cookie
-    current_app.logger.debug(f'Set sso session cookie')
-    set_cookie(config=current_app.config, response=resp, value=sso_session_id)
     return resp

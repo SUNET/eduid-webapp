@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Optional
 
 from eduid_common.authn import assurance
+from eduid_common.authn.idp_authn import AuthnData
 from eduid_common.authn.idp_saml import IdP_SAMLRequest, parse_saml_request, AuthnInfo, ResponseArgs
 from eduid_common.session import session
 from eduid_common.session.namespaces import SamlRequestInfo, LoginResponse
@@ -70,8 +71,12 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
 
     # TODO: Rewrite assurance when we retire the old idp
     # Until then we create an "sso_session" here to be compliant with shared code
+    credentials_used = []
+    for item in login_response.credentials_used:
+        credentials_used.append(AuthnData(user=user, credential=user.credentials.find(item.cred_id),
+                                          timestamp=item.authn_ts))
     sso_session_container = SSOSession(session.common.eppn, 'temporary_sso_session_container',
-                                       authn_credentials=login_response.credentials_used,
+                                       authn_credentials=credentials_used,
                                        external_mfa=login_response.mfa_action_external,
                                        ts=int(login_response.expires_at.timestamp()))
 
