@@ -39,7 +39,7 @@ import pprint
 from typing import FrozenSet
 
 from eduid_userdb import User
-from eduid_webapp.saml_idp.settings.common import IdpConfig
+from eduid_webapp.saml_idp.settings.common import SAMLIdpConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ SAML_ATTRIBUTES = frozenset({'displayName',
                              })
 
 
-def get_saml_attributes(user: User, config: IdpConfig, filter_attributes: FrozenSet[str] = SAML_ATTRIBUTES) -> dict:
+def get_saml_attributes(user: User, config: SAMLIdpConfig, filter_attributes: FrozenSet[str] = SAML_ATTRIBUTES) -> dict:
     """
     Return a dict of SAML attributes for a user.
 
@@ -82,7 +82,7 @@ def get_saml_attributes(user: User, config: IdpConfig, filter_attributes: Frozen
     return attributes
 
 
-def make_scoped_eppn(attributes: dict, config: IdpConfig) -> dict:
+def make_scoped_eppn(attributes: dict, config: SAMLIdpConfig) -> dict:
     """
     Add scope to unscoped eduPersonPrincipalName attributes before releasing them.
 
@@ -102,7 +102,7 @@ def make_scoped_eppn(attributes: dict, config: IdpConfig) -> dict:
     return attributes
 
 
-def add_scoped_affiliation(attributes: dict, config: IdpConfig) -> dict:
+def add_scoped_affiliation(attributes: dict, config: SAMLIdpConfig) -> dict:
     """
     Add eduPersonScopedAffiliation if configured, and not already present.
 

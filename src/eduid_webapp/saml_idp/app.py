@@ -7,7 +7,7 @@ from eduid_common.api.app import get_app_config, EduIDApp
 from eduid_common.api.debug import log_app_routes
 from eduid_common.session.sso_cache import SSOSessionCacheMDB
 from eduid_userdb.actions import ActionDB
-from eduid_webapp.saml_idp.settings.common import IdpConfig
+from eduid_webapp.saml_idp.settings.common import SAMLIdpConfig
 
 __author__ = 'lundberg'
 
@@ -17,7 +17,7 @@ class SAMLIdpApp(EduIDApp):
     def __init__(self, name, config):
         config = get_app_config(name, config)
         super(SAMLIdpApp, self).__init__(name, config)
-        self.config = IdpConfig(**config)
+        self.config = SAMLIdpConfig(**config)
         self.saml2_server: Saml2Server
         self.actions_db: ActionDB
 
@@ -26,8 +26,6 @@ class SAMLIdpApp(EduIDApp):
 
         # Init dbs
         self.actions_db = ActionDB(db_uri=self.config.mongo_uri)
-        self.sso_sessions = SSOSessionCacheMDB(uri=self.config.mongo_uri, logger=self.logger.getChild('sso_sessions'),
-                                               ttl=self.config.sso_permanent_session_lifetime * 60)
 
 
 def get_current_app() -> SAMLIdpApp:

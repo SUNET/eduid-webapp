@@ -38,20 +38,7 @@ def sso_redirect():
     session.saml_idp.requests[request_id] = saml_request_info
     current_app.logger.debug(f'REQ_INFO: {parsed_saml_request._req_info}')
 
-    # Check for SSO cookie
-    current_app.logger.debug(f'request.cookies: {request.cookies}')
-    if 'idpauthn' in request.cookies:
-        sso_session_id = bytes(request.cookies['idpauthn'], encoding='utf8')
-        sso_session = current_app.sso_sessions.get_session(sid=sso_session_id, return_object=True)
-        current_app.logger.debug(f'sso_session: {sso_session}')
-
-
-
-
     # TODO: Check which AuthnContext the SP expects
-
-    # We don't know who is trying to log in, the SSO session has wrong AuthnContext or force authn is true
-
 
     session.login.requests[request_id] = LoginRequest(
         # TODO: mfa
@@ -75,13 +62,12 @@ def sso_post():
 def return_url(request_id):
     saml_request_info = session.saml_idp.requests.get(request_id)
     login_response = session.login.responses.get(request_id)
-    sso_session = current_app.sso_sessions.get_session(sid=login_response.sso_session_id.encode(), return_object=True)
     if saml_request_info is None or login_response is None:
         return 'Login timeout, please try again'
     saml_request = get_saml_request(saml_request_info=saml_request_info)
     user = current_app.central_userdb.get_user_by_eppn(session.common.eppn)
     try:
-        response_authn = get_login_response_authn(saml_request, user, login_response, sso_session)
+        response_authn = get_login_response_authn(saml_request, user, login_response)
     except WrongMultiFactor as exc:
         current_app.logger.info('Assurance not possible: {!r}'.format(exc))
         return 'SWAMID_MFA_REQUIRED'
@@ -98,12 +84,12 @@ def return_url(request_id):
         current_app.logger.info('Bad request: {!r}'.format(exc))
         return f'Bad request: {exc.description}'
 
-    saml_response = make_saml_response(response_authn, resp_args, user, saml_request, sso_session)
+    saml_response = make_saml_response(response_authn, resp_args, user, saml_request, login_response)
     binding_out = resp_args['binding_out']
     destination = resp_args['destination']
     http_args = saml_request.apply_binding(resp_args, saml_request_info.relay_state, saml_response)
 
-    kantara.log_assertion_id(saml_response, request_id, login_response.sso_session_id)
+    kantara.log_assertion_id(saml_response, request_id, login_response.public_sso_session_id)
     # INFO-Log the SSO session id and the AL and destination
     current_app.logger.info(f'{request_id}: response authn={response_authn}, dst={destination}')
     fticks.log(hmac_key=current_app.config.fticks_secret_key,
@@ -120,7 +106,10 @@ def return_url(request_id):
     if binding_out == BINDING_HTTP_POST:
         resp = make_response(http_args['data'])
         resp.headers.extend(http_args['headers'])
-        return resp
-
-    current_app.logger.error(f'Unknown binding: {binding_out}')
-    return f'Unknown binding: {binding_out}'
+    else:
+        current_app.logger.error(f'Unknown binding: {binding_out}')
+        return f'Unknown binding: {binding_out}'
+    # Create SSO cookie
+    current_app.logger.debug(f'Set sso session cookie')
+    set_cookie(config=current_app.config, response=resp, value=sso_session_id)
+    return resp

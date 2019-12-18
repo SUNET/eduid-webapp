@@ -7,6 +7,7 @@ from typing import Optional
 
 from eduid_common.authn import assurance
 from eduid_common.authn.idp_saml import IdP_SAMLRequest, parse_saml_request, AuthnInfo, ResponseArgs
+from eduid_common.session import session
 from eduid_common.session.namespaces import SamlRequestInfo, LoginResponse
 from eduid_common.session.sso_session import SSOSession
 from eduid_userdb import User
@@ -45,8 +46,7 @@ def get_requested_authn_context(saml_req: IdP_SAMLRequest) -> Optional[str]:
     return res
 
 
-def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_response: LoginResponse,
-                             sso_session: SSOSession) -> AuthnInfo:
+def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_response: LoginResponse) -> AuthnInfo:
     """
     Figure out what AuthnContext to assert in the SAML response.
 
@@ -57,12 +57,10 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
     :param saml_request: State for this request
     :param user: The user for whom the assertion will be made
     :param login_response: Data from the login app
-    :param sso_session: Users SSO session
     :return: Authn information
     """
-    current_app.logger.debug(f'MFA credentials logged in the ticket: {login_response.mfa_action_creds}')
-    current_app.logger.debug(f'External MFA credential logged in the ticket: {login_response.mfa_action_external}')
-    current_app.logger.debug(f'Credentials used in this SSO session:\n{sso_session.authn_credentials}')
+    current_app.logger.debug(f'Credentials used:\n{login_response.credentials_used}')
+    current_app.logger.debug(f'External MFA credential: {login_response.mfa_action_external}')
     current_app.logger.debug(f'User credentials:\n{user.credentials.to_list()}')
 
     # Decide what AuthnContext to assert based on the one requested in the request
@@ -70,7 +68,14 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
 
     req_authn_context = get_requested_authn_context(saml_request)
 
-    resp_authn = assurance.response_authn(req_authn_context, user, sso_session, current_app.logger)
+    # TODO: Rewrite assurance when we retire the old idp
+    # Until then we create an "sso_session" here to be compliant with shared code
+    sso_session_container = SSOSession(session.common.eppn, 'temporary_sso_session_container',
+                                       authn_credentials=login_response.credentials_used,
+                                       external_mfa=login_response.mfa_action_external,
+                                       ts=int(login_response.expires_at.timestamp()))
+
+    resp_authn = assurance.response_authn(req_authn_context, user, sso_session_container, current_app.logger)
 
     current_app.logger.debug("Response Authn context class: {!r}".format(resp_authn))
 
@@ -81,11 +86,14 @@ def get_login_response_authn(saml_request: IdP_SAMLRequest, user: User, login_re
         current_app.logger.debug("Asserting AuthnContext {!r} (none requested)".format(resp_authn))
 
     # Augment the AuthnInfo with the authn_timestamp before returning it
-    return replace(resp_authn, instant=sso_session.authn_timestamp)
+    authn_timestamps = [int(item.authn_ts.timestamp()) for item in login_response.credentials_used]
+    # Pick the earliest credential use as authn instant
+    authn_instant = sorted(authn_timestamps)[0]
+    return replace(resp_authn, instant=authn_instant)
 
 
 def make_saml_response(authn_info: AuthnInfo, resp_args: ResponseArgs, user: User,
-                       saml_request: IdP_SAMLRequest, sso_session: SSOSession) -> str:
+                       saml_request: IdP_SAMLRequest, login_response: LoginResponse) -> str:
     """
     Create the SAML response using pysaml2 create_authn_response().
 
@@ -93,14 +101,14 @@ def make_saml_response(authn_info: AuthnInfo, resp_args: ResponseArgs, user: Use
     :param resp_args: pysaml2 response arguments
     :param user: user object
     :param saml_request: SAML request info
-    :param sso_session: SSO session from persistent storage
+    :param login_response: Data from the login app
 
     :return: SAML response in lxml format
     """
     attributes = get_saml_attributes(user, current_app.config)
     # Add a list of credentials used in a private attribute that will only be
     # released to the eduID authn component
-    attributes['eduidIdPCredentialsUsed'] = [x['cred_id'] for x in sso_session.authn_credentials]
+    attributes['eduidIdPCredentialsUsed'] = [item.cred_id for item in login_response.credentials_used]
     for k, v in authn_info.authn_attributes.items():
         if k in attributes:
             _previous = attributes[k]

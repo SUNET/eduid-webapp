@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
-from typing import Optional, List
+from typing import Optional
+from uuid import uuid4
 
-from flask import Blueprint, render_template, request, make_response, redirect
+from flask import Blueprint, render_template, request, redirect
 
-from eduid_common.api.decorators import require_user, MarshalWith, UnmarshalWith
 from eduid_common.api.exceptions import EduidTooManyRequests, EduidForbidden
-from eduid_common.authn.idp_authn import AuthnData
 from eduid_common.session import session
-from eduid_common.session.namespaces import LoginResponse
-from eduid_common.session.sso_session import SSOSession
+from eduid_common.session.namespaces import LoginResponse, SessionAuthnData
 from eduid_userdb import User
 from eduid_webapp.login.app import current_login_app as current_app
-from eduid_webapp.login.helpers import set_cookie
 
 __author__ = 'lundberg'
+
+from eduid_webapp.login.sso_session import create_sso_session, set_sso_cookie
 
 login_views = Blueprint('login', __name__, url_prefix='', template_folder='templates')
 
@@ -58,34 +57,28 @@ def login(request_id):
         # TODO: actions
         #check_for_pending_actions(self.context, user, ticket, self.sso_session)
 
-        session.common.eppn = authn_data.user.eppn
-        sso_session_id = _create_sso_session(authn_data.user, request_id, [authn_data])
 
         # Create SSO cookie
+        public_sso_session_id = str(uuid4())[:18]  # Use half to separate from the private sso session id
+        session_autn_data = SessionAuthnData(cred_id=authn_data.credential.credential_id, authn_ts=authn_data.timestamp)
+        login_response = LoginResponse(expires_at=login_request.expires_at,
+                                       credentials_used=[session_autn_data],
+                                       public_sso_session_id=public_sso_session_id)
+        sso_session_id = create_sso_session(authn_data.user, login_response, request_id, public_sso_session_id)
         res = redirect(login_request.return_endpoint_url, Response=current_app.response_class)
         current_app.logger.debug(f'Set sso session cookie')
-        set_cookie(config=current_app.config, response=res, value=sso_session_id)
+        set_sso_cookie(config=current_app.config, response=res, value=sso_session_id.decode('utf-8'))
+
+        # Update session
+        session.common.eppn = authn_data.user.eppn
+        session.login.responses[request_id] = login_response
 
         # Now that the user has authenticated and a SSO session has been created, redirect the users browser back to
         # the return url of the calling interface.
-        session.login.responses[request_id] = LoginResponse(expires_at=login_request.expires_at,
-                                                            sso_session_id=sso_session_id)
         current_app.logger.debug(f'Redirect => {login_request.return_endpoint_url}')
         return res
 
     return render_template('login.jinja2', request_id=request_id)
-
-
-def _create_sso_session(user: User, request_id: str, authninfo: List[AuthnData]) -> str:
-    sso_session = SSOSession(user_id=user.user_id, authn_request_id=request_id,
-                             authn_credentials=authninfo)
-    # This session contains information about the fact that the user was authenticated. It is
-    # used to avoid requiring subsequent authentication for the same user during a limited
-    # period of time, by storing the session-id in a browser cookie.
-    sso_session_id = current_app.sso_sessions.add_session(user.user_id, sso_session.to_dict())
-    # INFO-Log the request id (sha1 of SAMLrequest) and the sso_session
-    current_app.logger.info(f'login sso_session={sso_session.public_id}, user={user}')
-    return sso_session_id.decode('utf-8')
 
 
 def _lookup_user(username: Optional[str]) -> Optional[User]:
