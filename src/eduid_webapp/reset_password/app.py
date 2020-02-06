@@ -34,38 +34,50 @@
 from typing import cast
 from flask import current_app
 
-from eduid_userdb.security import PasswordResetStateDB
+from eduid_userdb.authninfo import AuthnInfoDB
+from eduid_userdb.reset_password import ResetPasswordUserDB, ResetPasswordStateDB
+from eduid_userdb.logs import ProofingLog
+from eduid_common.api import translation
 from eduid_common.api.app import get_app_config
 from eduid_common.api import mail_relay
 from eduid_common.api import am, msg
-from eduid_common.authn.middleware import AuthnApp
+from eduid_common.api import mail_relay
+from eduid_common.authn.middleware import AuthnBaseApp
+from eduid_common.authn.utils import no_authn_views
 from eduid_webapp.reset_password.settings.common import ResetPasswordConfig
 
 __author__ = 'eperez'
 
 
-class ResetPasswordApp(AuthnApp):
+class ResetPasswordApp(AuthnBaseApp):
 
-    def __init__(self, name, config):
-        # Init config for common setup
-        config = get_app_config(name, config)
-        super(ResetPasswordApp, self).__init__(name, config)
-        # Init app config
-        self.config = ResetPasswordConfig(**config)
-        # Init dbs
-        self.private_userdb = PasswordResetStateDB(self.config.mongo_uri)
+    def __init__(self, name: str, config: dict, **kwargs):
+
+        super(ResetPasswordApp, self).__init__(name, ResetPasswordConfig, config, **kwargs)
+
+        # Register views
+        from eduid_webapp.reset_password.views.reset_password import reset_password_views
+        from eduid_webapp.reset_password.views.change_password import change_password_views
+        self.register_blueprint(change_password_views)
+        self.register_blueprint(reset_password_views)
+
+        # Register view path that should not be authorized
+        self = no_authn_views(self, [r'/reset.*'])
+
         # Init celery
         msg.init_relay(self)
         am.init_relay(self, 'eduid_reset_password')
-        # Initiate external modules
+        mail_relay.init_relay(self)
+        translation.init_babel(self)
+
+        # Init dbs
+        self.private_userdb = ResetPasswordUserDB(self.config.mongo_uri)
+        self.password_reset_state_db = ResetPasswordStateDB(self.config.mongo_uri)
+        self.proofing_log = ProofingLog(self.config.mongo_uri)
+        self.authninfo_db = AuthnInfoDB(self.config.mongo_uri)
 
 
-def get_current_app() -> ResetPasswordApp:
-    """Teach pycharm about ResetPasswordApp"""
-    return current_app  # type: ignore
-
-
-current_reset_password_app = get_current_app()
+current_reset_password_app: ResetPasswordApp = cast(ResetPasswordApp, current_app)
 
 
 def init_reset_password_app(name: str, config: dict) -> ResetPasswordApp:
@@ -74,13 +86,9 @@ def init_reset_password_app(name: str, config: dict) -> ResetPasswordApp:
     :param config: any additional configuration settings. Specially useful
                    in test cases
 
-    :return: the flask app
     """
     app = ResetPasswordApp(name, config)
 
-    # Register views
-    from eduid_webapp.reset_password.views import reset_password_views
-    app.register_blueprint(reset_password_views, url_prefix=app.config.application_root)
+    app.logger.info(f'Init {name} app...')
 
-    app.logger.info('{!s} initialized'.format(name))
     return app
