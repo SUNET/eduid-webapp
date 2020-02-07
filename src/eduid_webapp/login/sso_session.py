@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 from dataclasses import field, dataclass, asdict
-from typing import List, Dict
+from typing import List, Dict, Optional
 
+from flask import request
 from werkzeug import Response
 
 from eduid_common.session.namespaces import LoginResponse, SessionAuthnData
 from eduid_common.session.sso_cache import SSOSessionId
-from eduid_userdb import User
 from eduid_webapp.login.app import current_login_app as current_app
 from eduid_webapp.login.settings.common import LoginConfig
 
@@ -20,17 +20,29 @@ class SSOSession:
     authentication_data: Dict[str, List[SessionAuthnData]] = field(default_factory=dict)
 
 
-def create_sso_session(user: User, login_response: LoginResponse, request_id: str,
+def create_sso_session(user_eppn: str, login_response: LoginResponse, request_id: str,
                        public_session_id: str) -> SSOSessionId:
-    sso_session = SSOSession(eppn=user.eppn, public_id=public_session_id)
+    sso_session = SSOSession(eppn=user_eppn, public_id=public_session_id)
     sso_session.authentication_data[request_id] = login_response.credentials_used
     # This session contains information about the fact that the user was authenticated. It is
     # used to avoid requiring subsequent authentication for the same user during a limited
     # period of time, by storing the session-id in a browser cookie.
-    sso_session_id = current_app.sso_sessions.add_session(user.eppn, asdict(sso_session))
+    sso_session_id = current_app.sso_sessions.add_session(user_eppn, asdict(sso_session))
     # INFO-Log the request id and the sso_session
     current_app.logger.info(f'{request_id}: sso_session={sso_session.public_id}')
     return sso_session_id
+
+
+def get_sso_session() -> Optional[SSOSession]:
+    sso_session_id = request.cookies.get(current_app.config.sso_session_cookie_name)
+    current_app.logger.debug(f'{request.cookies}')
+    current_app.logger.debug(f'{current_app.config.sso_session_cookie_name}')
+    current_app.logger.debug(f'{sso_session_id}')
+    if sso_session_id:
+        b_sso_session_id = bytes(sso_session_id, encoding='utf-8')
+        current_app.logger.debug(f'{b_sso_session_id}')
+        return current_app.sso_sessions.get_session(b_sso_session_id, return_object=True)
+    return None
 
 
 def set_sso_cookie(config: LoginConfig, response: Response, value: str) -> None:

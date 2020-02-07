@@ -5,7 +5,7 @@
     <title>Title</title>
 </head>
 <body>
-<form class="form-horizontal well well-large" action='{{ url_for('login.login', request_id=request_id) }}' method="POST">
+<form class="form-horizontal well well-large" action='{{ url_for('login.check_username_and_password', request_id=request_id) }}' method="POST">
     <fieldset>
         <legend class="">{{ _("eduID login") }}</legend>
 

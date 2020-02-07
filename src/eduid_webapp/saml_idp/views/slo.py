@@ -11,16 +11,20 @@ slo_views = Blueprint('slo', __name__, url_prefix='/slo', template_folder='templ
 @slo_views.route('/redirect', methods=['GET'])
 def slo_redirect():
     current_app.logger.info('SLO REDIRECT called')
-    return 200, 'OK'
+    return 'OK'
 
 
 @slo_views.route('/post', methods=['POST'])
 def slo_post():
     current_app.logger.info('SLO POST called')
-    return 200, 'OK'
+    return 'OK'
 
 
 @slo_views.route('/soap', methods=['POST'])
 def slo_soap():
     current_app.logger.info('SLO SOAP called')
-    return 200, 'OK'
+    return 'OK'
+
+
+def invalidate_sso_session():
+    pass
