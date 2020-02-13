@@ -2,36 +2,47 @@
 from typing import Optional
 from uuid import uuid4
 
-from flask import Blueprint, render_template, request, redirect, url_for, Request
+from eduid_userdb import User
+from flask import Blueprint, render_template, request, redirect, url_for
 
 from eduid_common.api.exceptions import EduidTooManyRequests, EduidForbidden
 from eduid_common.session import session
 from eduid_common.session.namespaces import LoginResponse, SessionAuthnData
-from eduid_userdb import User
 from eduid_webapp.login.app import current_login_app as current_app
+from eduid_webapp.login.sso_session import create_sso_session, set_sso_cookie, get_sso_session, verify_sso_session
+from eduid_webapp.login.sso_session import update_sso_session
 
 __author__ = 'lundberg'
-
-from eduid_webapp.login.sso_session import create_sso_session, set_sso_cookie, get_sso_session
 
 login_views = Blueprint('login', __name__, url_prefix='', template_folder='templates')
 
 
 @login_views.route('/<request_id>', methods=['GET'])
-def authn_dispatcher(request_id):
+def authn_dispatcher(request_id: str):
     current_app.logger.info('DISPATCHER ENDPOINT')
-    # TODO: Check for existing SSO session
+    login_request = session.login.requests.get(request_id)
+    if not login_request:
+        return render_template('error.jinja2', heading='Login timeout',
+                               message='The request took too long to complete, please try to log in again.')
     sso_session = get_sso_session()
-    if sso_session:
-        return sso_session
-    # No SSO session found, need to identify user
+    # Update the login request with sso session data
+    verify_sso_session(sso_session, login_request)
+    if login_request.eppn and not login_request.force_authn:
+        # User is identified, go to actions
+        #session.persist()  # Explicitly persist session when chaining views
+        return check_actions_and_create_sso_session(request_id)
+    # No SSO session found or force authn, need to identify user
     return redirect(url_for('login.check_username_and_password', request_id=request_id),
                     Response=current_app.response_class)
 
 
 @login_views.route('/identify/<request_id>', methods=['GET', 'POST'])
-def check_username_and_password(request_id):
+def check_username_and_password(request_id: str):
     current_app.logger.info('LOGIN ENDPOINT')
+    login_request = session.login.requests.get(request_id)
+    if not login_request:
+        return render_template('error.jinja2', heading='Login timeout',
+                               message='The request took too long to complete, please try to log in again.')
     if request.method == 'POST':
         current_app.logger.info('LOGIN ENDPOINT POST')
 
@@ -48,10 +59,9 @@ def check_username_and_password(request_id):
             authn_data = current_app.authn.password_authn(login_data, lookup_user=_lookup_user)
             if authn_data:
                 # Update login request with verified password credential and eppn
-                login_request = session.login.requests.get(request_id)
                 login_request.verified_credentials.append(SessionAuthnData(cred_id=authn_data.credential.credential_id,
                                                                            authn_ts=authn_data.timestamp))
-                login_request.user_eppn = authn_data.user.eppn
+                login_request.eppn = authn_data.user.eppn
                 return check_actions_and_create_sso_session(request_id)
             current_app.logger.debug('Unknown user or wrong password.')
             return render_template('login.jinja2', request_id=request_id, error_message='Login incorrect')
@@ -69,7 +79,7 @@ def check_username_and_password(request_id):
 
 
 @login_views.route('/sso/<request_id>', methods=['GET', 'POST'])
-def check_actions_and_create_sso_session(request_id):
+def check_actions_and_create_sso_session(request_id: str):
     login_request = session.login.requests.get(request_id)
     if not login_request:
         return render_template('error.jinja2', heading='Login timeout',
@@ -79,18 +89,28 @@ def check_actions_and_create_sso_session(request_id):
 
     # TODO: Check for existing SSO session to update (or invalidate?)
 
-    # Create SSO session
-    public_sso_session_id = str(uuid4())[:18]  # Use half to separate from the private sso session id
+    create_sso = False
+    if not login_request.sso_session_public_id:
+        # Create SSO session
+        create_sso = True
+        login_request.sso_session_public_id = str(uuid4())[:18]  # Use half to separate from the private sso session id
     login_response = LoginResponse(expires_at=login_request.expires_at,
                                    credentials_used=login_request.verified_credentials,
-                                   public_sso_session_id=public_sso_session_id)
-    sso_session_id = create_sso_session(login_request.user_eppn, login_response, request_id, public_sso_session_id)
+                                   public_sso_session_id=login_request.sso_session_public_id)
+    if create_sso:
+        sso_session_id = create_sso_session(login_request.eppn, login_response, request_id,
+                                            login_request.sso_session_public_id)
+    else:
+        # Update existing sso session
+        # XXX: Not really an update, just another create for now
+        sso_session_id = update_sso_session(login_request.eppn, login_response, request_id,
+                                            login_request.sso_session_public_id)
     res = redirect(login_request.return_endpoint_url, Response=current_app.response_class)
     current_app.logger.debug(f'Set sso session cookie')
     set_sso_cookie(config=current_app.config, response=res, value=sso_session_id.decode('utf-8'))
 
     # Update session
-    session.common.eppn = login_request.user_eppn
+    session.common.eppn = login_request.eppn
     session.login.responses[request_id] = login_response
 
     # Now that the user has authenticated and a SSO session has been created, redirect the users browser back to
