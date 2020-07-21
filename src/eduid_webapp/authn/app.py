@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2016 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -34,20 +35,23 @@ from typing import cast
 from flask import current_app
 
 from eduid_common.api.app import EduIDBaseApp
-from eduid_common.api.app import get_app_config
 from eduid_common.authn.utils import get_saml2_config
+
 from eduid_webapp.authn.settings.common import AuthnConfig
 
 
 class AuthnApp(EduIDBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(AuthnApp, self).__init__(name, AuthnConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = AuthnConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: AuthnConfig = cast(AuthnConfig, self.config)  # type: ignore
 
         self.saml2_config = get_saml2_config(self.config.saml2_settings_module)
 
         from eduid_webapp.authn.views import authn_views
+
         self.register_blueprint(authn_views)
 
 

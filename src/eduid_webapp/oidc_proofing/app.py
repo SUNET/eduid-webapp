@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -34,39 +34,42 @@ from typing import cast
 
 from flask import current_app
 
-from eduid_common.api.app import get_app_config
-from eduid_common.api import am, msg, mail_relay, translation, oidc
-from eduid_common.authn.utils import no_authn_views
+from eduid_common.api import am, mail_relay, msg, oidc, translation
 from eduid_common.authn.middleware import AuthnBaseApp
-from eduid_userdb.proofing import OidcProofingStateDB, OidcProofingUserDB
+from eduid_common.authn.utils import no_authn_views
 from eduid_userdb.logs import ProofingLog
+from eduid_userdb.proofing import OidcProofingStateDB, OidcProofingUserDB
+
 from eduid_webapp.oidc_proofing.settings.common import OIDCProofingConfig
 
 __author__ = 'lundberg'
 
 
 class OIDCProofingApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(OIDCProofingApp, self).__init__(name, OIDCProofingConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = OIDCProofingConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: OIDCProofingConfig = cast(OIDCProofingConfig, self.config)  # type: ignore
 
         from eduid_webapp.oidc_proofing.views import oidc_proofing_views
+
         self.register_blueprint(oidc_proofing_views)
 
         # Register view path that should not be authorized
-        self = no_authn_views(self, ['/authorization-response'])
+        no_authn_views(self, ['/authorization-response'])
 
         # Initialize the oidc_client after views to be able to set correct redirect_uris
-        self = oidc.init_client(self)
+        oidc.init_client(self)
 
         # Init celery
-        self = msg.init_relay(self)
-        self = am.init_relay(self, 'eduid_oidc_proofing')
-        self = mail_relay.init_relay(self)
+        msg.init_relay(self)
+        am.init_relay(self, 'eduid_oidc_proofing')
+        mail_relay.init_relay(self)
 
         # Init babel
-        self = translation.init_babel(self)
+        translation.init_babel(self)
 
         # Initialize db
         self.private_userdb = OidcProofingUserDB(self.config.mongo_uri)

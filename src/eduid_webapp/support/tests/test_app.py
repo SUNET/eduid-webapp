@@ -34,6 +34,7 @@
 from __future__ import absolute_import
 
 from eduid_common.api.testing import EduidAPITestCase
+
 from eduid_webapp.support.app import support_init_app
 from eduid_webapp.support.settings.common import SupportConfig
 
@@ -57,9 +58,9 @@ class SupportAppTests(EduidAPITestCase):
         return support_init_app('testing', config)
 
     def update_config(self, app_config):
-        app_config.update({
-            'support_personnel': ['hubba-bubba'],
-        })
+        app_config.update(
+            {'support_personnel': ['hubba-bubba'],}
+        )
         return SupportConfig(**app_config)
 
     def test_authenticate(self):
@@ -68,4 +69,3 @@ class SupportAppTests(EduidAPITestCase):
         with self.session_cookie(self.client, self.test_user_eppn) as client:
             response = client.get('/')
         self.assertEqual(response.status_code, 200)  # Authenticated request
-

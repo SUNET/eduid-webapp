@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -34,11 +34,11 @@ from typing import cast
 
 from flask import current_app
 
-from eduid_common.api.app import get_app_config
 from eduid_common.api import am, msg
 from eduid_common.authn.middleware import AuthnBaseApp
-from eduid_userdb.proofing import LookupMobileProofingUserDB
 from eduid_userdb.logs import ProofingLog
+from eduid_userdb.proofing import LookupMobileProofingUserDB
+
 from eduid_webapp.lookup_mobile_proofing import lookup_mobile_relay
 from eduid_webapp.lookup_mobile_proofing.settings.common import MobileProofingConfig
 
@@ -46,14 +46,16 @@ __author__ = 'lundberg'
 
 
 class MobileProofingApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = MobileProofingConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: MobileProofingConfig = cast(MobileProofingConfig, self.config)  # type: ignore
 
-        super(MobileProofingApp, self).__init__(name, MobileProofingConfig,
-                                                config, **kwargs)
-        self.config: MobileProofingConfig = cast(MobileProofingConfig, self.config)
         # Register views
         from eduid_webapp.lookup_mobile_proofing.views import mobile_proofing_views
+
         self.register_blueprint(mobile_proofing_views)
 
         # Init dbs
@@ -61,9 +63,9 @@ class MobileProofingApp(AuthnBaseApp):
         self.proofing_log = ProofingLog(self.config.mongo_uri)
 
         # Init celery
-        self = lookup_mobile_relay.init_relay(self)
-        self = msg.init_relay(self)
-        self = am.init_relay(self, 'eduid_lookup_mobile_proofing')
+        lookup_mobile_relay.init_relay(self)
+        msg.init_relay(self)
+        am.init_relay(self, 'eduid_lookup_mobile_proofing')
 
 
 current_mobilep_app: MobileProofingApp = cast(MobileProofingApp, current_app)

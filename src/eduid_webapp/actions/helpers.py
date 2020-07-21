@@ -30,26 +30,53 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-from __future__ import absolute_import
+from enum import unique
 
 from flask import abort
+
+from eduid_common.api.messages import TranslatableMsg
 from eduid_common.session import session
+
 from eduid_webapp.actions.app import current_actions_app as current_app
+
+
+@unique
+class ActionsMsg(TranslatableMsg):
+    """
+    Messages sent to the front end with information on the results of the
+    attempted operations on the back end.
+    """
+
+    # the user corresponding to the action has not been found in the db
+    user_not_found = 'mfa.user-not-found'
+    # The (mfa|tou|...) action has been completed successfully
+    action_completed = 'actions.action-completed'
+    # No mfa data sent in authn request
+    no_data = 'mfa.no-request-data'
+    # Neither u2f nor webauthn data in request to authn
+    no_response = 'mfa.no-token-response'
+    # The mfa data sent does not correspond to a known mfa token
+    unknown_token = 'mfa.unknown-token'
+    # Cannot find the text for the he ToU version configured
+    no_tou = 'tou.no-tou'
+    # The user has not accepted the ToU
+    must_accept = 'tou.must-accept'
+    # Error synchronizing the ToU acceptance to the central db
+    sync_problem = 'tou.sync-problem'
+    # for use in the tests
+    test_error = 'test error'
 
 
 def get_next_action(user):
     idp_session = session.actions.session
     action = current_app.actions_db.get_next_action(user.eppn, idp_session)
     if action is None:
-        current_app.logger.info("Finished pre-login actions "
-                                "for user: {}".format(user))
-        idp_url = '{}?key={}'.format(current_app.config.idp_url,
-                                     idp_session)
+        current_app.logger.info("Finished pre-login actions " "for user: {}".format(user))
+        idp_url = '{}?key={}'.format(current_app.config.idp_url, idp_session)
         return {'action': False, 'idp_url': idp_url}
 
     if action.action_type not in current_app.plugins:
-        current_app.logger.info("Missing plugin for action "
-                                "{}".format(action.action_type))
+        current_app.logger.info("Missing plugin for action " "{}".format(action.action_type))
         abort(500)
 
     action_dict = action.to_dict()

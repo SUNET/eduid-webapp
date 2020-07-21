@@ -3,11 +3,12 @@ redis>=3.2.0,==3.*
 pynacl>=1.0.1
 python-etcd>=0.4.3
 Pillow>=3.0.0
-eduid-userdb>=0.4.6b15
-eduid-common[webapp]>=0.4.6
-eduid-am>=0.6.3b7
+eduid-userdb>=0.4.18
+eduid-common[webapp]>=0.7.4,==0.7.*
+eduid-am>=0.7.7
 eduid-msg>=0.10.3b7
-marshmallow>=2.15.1,==2.*
+marshmallow>=3.0,==3.*
+marshmallow-enum==1.5.*
 Babel>=2.6.0
 flask-babel>=0.11.2
 oic>=0.8.3

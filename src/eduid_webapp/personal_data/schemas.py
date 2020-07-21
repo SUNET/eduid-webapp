@@ -32,13 +32,14 @@
 #
 
 from marshmallow import fields
-from eduid_common.api.schemas.base import FluxStandardAction, EduidSchema
+
+from eduid_common.api.schemas.base import EduidSchema, FluxStandardAction
+from eduid_common.api.schemas.csrf import CSRFRequestMixin, CSRFResponseMixin
 from eduid_common.api.schemas.nin import NinSchema
 from eduid_common.api.schemas.orcid import OrcidSchema
-from eduid_common.api.schemas.csrf import CSRFResponseMixin, CSRFRequestMixin
-from eduid_webapp.personal_data.validators import validate_language
-from eduid_webapp.personal_data.validators import validate_nonempty
+
 from eduid_webapp.email.schemas import EmailSchema
+from eduid_webapp.personal_data.validators import validate_language, validate_nonempty
 from eduid_webapp.phone.schemas import PhoneSchema
 
 __author__ = 'eperez'
@@ -49,11 +50,10 @@ class PersonalDataRequestSchema(EduidSchema, CSRFRequestMixin):
     given_name = fields.String(required=True, validate=validate_nonempty)
     surname = fields.String(required=True, validate=validate_nonempty)
     display_name = fields.String(required=True, validate=validate_nonempty)
-    language = fields.String(required=True, default='en',
-                             validate=validate_language)
+    language = fields.String(required=True, default='en', validate=validate_language)
 
 
-class PersonalDataSchema(EduidSchema, CSRFResponseMixin):
+class PersonalDataSchema(EduidSchema):
 
     given_name = fields.String(required=True, attribute='givenName')
     surname = fields.String(required=True)
@@ -61,22 +61,14 @@ class PersonalDataSchema(EduidSchema, CSRFResponseMixin):
     language = fields.String(required=True, attribute='preferredLanguage', validate=validate_language)
 
 
-class PersonalDataSubSchema(EduidSchema, CSRFResponseMixin):
-
-    given_name = fields.String(required=True)
-    surname = fields.String(required=True)
-    display_name = fields.String(required=True)
-    language = fields.String(required=True,
-            validate=validate_language)
-
-
 class PersonalDataResponseSchema(FluxStandardAction):
+    class PersonalDataResponsePayload(PersonalDataSchema, CSRFResponseMixin):
+        pass
 
-    payload = fields.Nested(PersonalDataSubSchema)
+    payload = fields.Nested(PersonalDataResponsePayload)
 
 
 class NinsResponseSchema(FluxStandardAction):
-
     class NinResponsePayload(EmailSchema, CSRFResponseMixin):
         nins = fields.Nested(NinSchema, many=True)
 
@@ -95,18 +87,8 @@ class AllDataSchema(EduidSchema):
     orcid = fields.Nested(OrcidSchema, attribute='orcid')
 
 
-class AllDataResponseSubSchema(EduidSchema, CSRFResponseMixin):
-    eppn = fields.String(required=True)
-    given_name = fields.String(required=True)
-    surname = fields.String(required=True)
-    display_name = fields.String(required=True)
-    language = fields.String(required=True,
-            validate=validate_language)
-    nins = fields.Nested(NinSchema, many=True)
-    emails = fields.Nested(EmailSchema, many=True)
-    phones = fields.Nested(PhoneSchema, many=True)
-    orcid = fields.Nested(OrcidSchema)
-
-
 class AllDataResponseSchema(FluxStandardAction):
-    payload = fields.Nested(AllDataResponseSubSchema)
+    class AllDataResponsePayload(AllDataSchema, CSRFResponseMixin):
+        pass
+
+    payload = fields.Nested(AllDataResponsePayload)

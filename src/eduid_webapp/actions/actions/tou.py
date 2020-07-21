@@ -38,11 +38,12 @@ from bson import ObjectId
 from flask import request
 
 from eduid_userdb.actions import Action
-from eduid_userdb.actions.tou import ToUUserDB, ToUUser
+from eduid_userdb.actions.tou import ToUUser, ToUUserDB
 from eduid_userdb.tou import ToUEvent
+
 from eduid_webapp.actions.action_abc import ActionPlugin
 from eduid_webapp.actions.app import current_actions_app as current_app
-from eduid_common.api.exceptions import AmTaskFailed
+from eduid_webapp.actions.helpers import ActionsMsg
 
 
 class Plugin(ActionPlugin):
@@ -56,6 +57,7 @@ class Plugin(ActionPlugin):
 
         # This import has to happen _after_ eduid_am has been initialized
         from eduid_am.tasks import update_attributes_keep_result
+
         self._update_attributes = update_attributes_keep_result
 
     @classmethod
@@ -66,16 +68,16 @@ class Plugin(ActionPlugin):
         tous = current_app.get_tous(version=action.params['version'])
         if not tous:
             current_app.logger.error('Could not load any TOUs')
-            raise self.ActionError('tou.no-tou')
+            raise self.ActionError(ActionsMsg.no_tou)
         return {
             'version': action.params['version'],
             'tous': tous,
-            'available_languages': current_app.config.available_languages
+            'available_languages': current_app.config.available_languages,
         }
 
     def perform_step(self, action: Action):
         if not request.get_json().get('accept', ''):
-            raise self.ActionError('tou.must-accept')
+            raise self.ActionError(ActionsMsg.must_accept)
 
         eppn = action.eppn
         central_user = current_app.central_userdb.get_user_by_eppn(eppn)
@@ -90,13 +92,17 @@ class Plugin(ActionPlugin):
             existing_tou.modified_ts = datetime.utcnow()
         else:
             current_app.logger.info('ToU version {} accepted by user {}'.format(version, user))
-            user.tou.add(ToUEvent(
-                version=version,
-                application='eduid_tou_plugin',
-                created_ts=datetime.utcnow(),
-                modified_ts=datetime.utcnow(),
-                event_id=ObjectId()
-            ))
+            user.tou.add(
+                ToUEvent.from_dict(
+                    dict(
+                        version=version,
+                        created_by='eduid_tou_plugin',
+                        created_ts=datetime.utcnow(),
+                        modified_ts=datetime.utcnow(),
+                        event_id=ObjectId(),
+                    )
+                )
+            )
 
         current_app.tou_db.save(user, check_sync=False)
         current_app.logger.debug("Asking for sync of {} by Attribute Manager".format(user))
@@ -109,4 +115,4 @@ class Plugin(ActionPlugin):
             return {}
         except Exception as e:
             current_app.logger.error("Failed Attribute Manager sync request: " + str(e))
-            raise self.ActionError('tou.sync-problem')
+            raise self.ActionError(ActionsMsg.sync_problem)

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2016 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -34,30 +35,29 @@ from typing import cast
 
 from flask import current_app
 
-from eduid_common.api.app import get_app_config
-from eduid_common.api import mail_relay
-from eduid_common.api import am
-from eduid_common.api import translation
+from eduid_common.api import am, mail_relay, translation
 from eduid_common.authn.middleware import AuthnBaseApp
-from eduid_userdb.proofing import EmailProofingUserDB
-from eduid_userdb.proofing import EmailProofingStateDB
 from eduid_userdb.logs import ProofingLog
+from eduid_userdb.proofing import EmailProofingStateDB, EmailProofingUserDB
+
 from eduid_webapp.email.settings.common import EmailConfig
 
 
 class EmailApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(EmailApp, self).__init__(name, EmailConfig, config, **kwargs)
-        self.config: EmailConfig = cast(EmailConfig, self.config)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = EmailConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: EmailConfig = cast(EmailConfig, self.config)  # type: ignore
 
         from eduid_webapp.email.views import email_views
+
         self.register_blueprint(email_views)
 
-        self = am.init_relay(self, 'eduid_email')
-        self = mail_relay.init_relay(self)
-        self = translation.init_babel(self)
+        am.init_relay(self, 'eduid_email')
+        mail_relay.init_relay(self)
+        translation.init_babel(self)
 
         self.private_userdb = EmailProofingUserDB(self.config.mongo_uri)
         self.proofing_statedb = EmailProofingStateDB(self.config.mongo_uri)

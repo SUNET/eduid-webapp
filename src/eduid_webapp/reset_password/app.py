@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -32,37 +32,38 @@
 #
 
 from typing import cast
+
 from flask import current_app
 
-from eduid_userdb.authninfo import AuthnInfoDB
-from eduid_userdb.reset_password import ResetPasswordUserDB, ResetPasswordStateDB
-from eduid_userdb.logs import ProofingLog
-from eduid_common.api import translation
-from eduid_common.api.app import get_app_config
-from eduid_common.api import mail_relay
-from eduid_common.api import am, msg
-from eduid_common.api import mail_relay
+from eduid_common.api import am, mail_relay, msg, translation
 from eduid_common.authn.middleware import AuthnBaseApp
 from eduid_common.authn.utils import no_authn_views
+from eduid_userdb.authninfo import AuthnInfoDB
+from eduid_userdb.logs import ProofingLog
+from eduid_userdb.reset_password import ResetPasswordStateDB, ResetPasswordUserDB
+
 from eduid_webapp.reset_password.settings.common import ResetPasswordConfig
 
 __author__ = 'eperez'
 
 
 class ResetPasswordApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(ResetPasswordApp, self).__init__(name, ResetPasswordConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = ResetPasswordConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: ResetPasswordConfig = cast(ResetPasswordConfig, self.config)  # type: ignore
 
         # Register views
         from eduid_webapp.reset_password.views.reset_password import reset_password_views
         from eduid_webapp.reset_password.views.change_password import change_password_views
+
         self.register_blueprint(change_password_views)
         self.register_blueprint(reset_password_views)
 
         # Register view path that should not be authorized
-        self = no_authn_views(self, [r'/reset.*'])
+        no_authn_views(self, [r'/reset.*', r'/new-password/?'])
 
         # Init celery
         msg.init_relay(self)

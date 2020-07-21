@@ -34,7 +34,7 @@
 Configuration (file) handling for the eduID reset_password app.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from eduid_common.config.base import FlaskConfig
 
@@ -44,6 +44,7 @@ class ResetPasswordConfig(FlaskConfig):
     """
     Configuration for the reset_password app
     """
+
     app_name: str = "reset_password"
     email_code_timeout: int = 7200
     phone_code_timeout: int = 600
@@ -63,3 +64,11 @@ class ResetPasswordConfig(FlaskConfig):
     chpass_timeout: int = 600
     # VCCS URL
     vccs_url: str = ''
+    # URL to get the js app that can drive the process to reset the password
+    password_reset_link: str = 'https://login.eduid.se/reset-password/'
+    password_service_url: str = '/services/reset-password/'
+    # webauthn stuff
+    generate_u2f_challenges: bool = False  # UNUSED, remove after updating config everywhere
+    u2f_valid_facets: list = field(default_factory=list)
+    # Throttle sending SMSs for extra security resetting passwords
+    throttle_sms_seconds: int = 300

@@ -34,10 +34,8 @@
 from __future__ import absolute_import
 
 from dataclasses import dataclass
+
 from eduid_common.config.base import FlaskConfig
-
-
-
 
 
 @dataclass
@@ -45,6 +43,7 @@ class LetterProofingConfig(FlaskConfig):
     """
     Configuration for the letter proofing app
     """
+
     letter_wait_time_hours: int = 336  # 2 weeks
 
     ekopost_api_uri: str = 'https://api.ekopost.se'

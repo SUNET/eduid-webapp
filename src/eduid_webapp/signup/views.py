@@ -31,17 +31,30 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-import requests
-from flask import Blueprint, request, abort, render_template
+from flask import Blueprint, abort, request
 
 from eduid_common.api.decorators import MarshalWith, UnmarshalWith
+from eduid_common.api.helpers import check_magic_cookie
+from eduid_common.api.messages import CommonMsg, FluxData, error_response, success_response
 from eduid_common.api.schemas.base import FluxStandardAction
-from eduid_common.session import session
-from eduid_webapp.signup.helpers import check_email_status, remove_users_with_mail_address, complete_registration
-from eduid_webapp.signup.schemas import RegisterEmailSchema, AccountCreatedResponse, EmailSchema
-from eduid_webapp.signup.verifications import CodeDoesNotExist, AlreadyVerifiedException, ProofingLogFailure
-from eduid_webapp.signup.verifications import verify_recaptcha, send_verification_mail, verify_email_code
+from eduid_userdb.exceptions import EduIDUserDBError
+
 from eduid_webapp.signup.app import current_signup_app as current_app
+from eduid_webapp.signup.helpers import (
+    SignupMsg,
+    check_email_status,
+    complete_registration,
+    remove_users_with_mail_address,
+)
+from eduid_webapp.signup.schemas import AccountCreatedResponse, EmailSchema, RegisterEmailSchema
+from eduid_webapp.signup.verifications import (
+    AlreadyVerifiedException,
+    CodeDoesNotExist,
+    ProofingLogFailure,
+    send_verification_mail,
+    verify_email_code,
+    verify_recaptcha,
+)
 
 signup_views = Blueprint('signup', __name__, url_prefix='', template_folder='templates')
 
@@ -54,22 +67,28 @@ def trycaptcha(email, recaptcha_response, tou_accepted):
     Kantara requires a check for humanness even at level AL1.
     """
     if not tou_accepted:
-        return {
-                '_status': 'error',
-                'message': 'signup.tou-not-accepted'
-        }
-    config = current_app.config
-    remote_ip = request.remote_addr
-    recaptcha_public_key = config.recaptcha_public_key
+        return error_response(message=SignupMsg.no_tou)
 
-    if recaptcha_public_key:
-        recaptcha_private_key = config.recaptcha_private_key
-        recaptcha_verified = verify_recaptcha(recaptcha_private_key,
-                                              recaptcha_response, remote_ip)
-    else:
-        # If recaptcha_public_key is not set recaptcha is disabled
+    config = current_app.config
+    recaptcha_verified = False
+
+    # add a backdoor to bypass recaptcha checks for humanness,
+    # to be used in testing environments for automated integration tests.
+    if check_magic_cookie(config):
+        current_app.logger.info('Using BACKDOOR to verify reCaptcha during signup!')
         recaptcha_verified = True
-        current_app.logger.info('CAPTCHA disabled')
+
+    # common path with no backdoor
+    if not recaptcha_verified:
+        remote_ip = request.remote_addr
+        recaptcha_public_key = config.recaptcha_public_key
+
+        if recaptcha_public_key:
+            recaptcha_private_key = config.recaptcha_private_key
+            recaptcha_verified = verify_recaptcha(recaptcha_private_key, recaptcha_response, remote_ip)
+        else:
+            recaptcha_verified = False
+            current_app.logger.info('Missing configuration for reCaptcha!')
 
     if recaptcha_verified:
         next = check_email_status(email)
@@ -77,25 +96,16 @@ def trycaptcha(email, recaptcha_response, tou_accepted):
             # Workaround for failed earlier sync of user to userdb: Remove any signup_user with this e-mail address.
             remove_users_with_mail_address(email)
             send_verification_mail(email)
-            return {
-                'message': 'signup.registering-new',
-                'next': next
-            }
+            return success_response(payload=dict(next=next), message=SignupMsg.reg_new)
+
         elif next == 'resend-code':
-            return {
-                'next': next
-            }
+            return {'next': next}
+
         elif next == 'address-used':
             current_app.stats.count(name='address_used_error')
-            return {
-                '_status': 'error',
-                'message': 'signup.registering-address-used',
-                'next': next
-            }
-    return {
-            '_status': 'error',
-            'message': 'signup.recaptcha-not-verified'
-    }
+            return error_response(payload=dict(next=next), message=SignupMsg.email_used)
+
+    return error_response(message=SignupMsg.no_recaptcha)
 
 
 @signup_views.route('/resend-verification', methods=['POST'])
@@ -109,29 +119,41 @@ def resend_email_verification(email):
     current_app.logger.debug("Resend email confirmation to {!s}".format(email))
     send_verification_mail(email)
     current_app.stats.count(name='resend_code')
-    return {'message': 'signup.verification-resent'}
+    return success_response(message=SignupMsg.resent_success)
 
 
 @signup_views.route('/verify-link/<code>', methods=['GET'])
 @MarshalWith(FluxStandardAction)
-def verify_link(code):
+def verify_link(code: str) -> FluxData:
     try:
         user = verify_email_code(code)
     except CodeDoesNotExist:
-        return {
-                '_status': 'error',
-                'status': 'unknown-code',
-                'message': 'signup.unknown-code'
-                }
+        return error_response(payload=dict(status='unknown-code'), message=SignupMsg.unknown_code)
+
     except AlreadyVerifiedException:
-        return {
-                '_status': 'error',
-                'status': 'already-verified',
-                'message': 'signup.already-verified'
-                }
+        return error_response(payload=dict(status='already-verified'), message=SignupMsg.already_verified)
+
     except ProofingLogFailure:
-        return {
-            '_status': 'error',
-            'message': 'Temporary technical problems'
-        }
+        return error_response(message=CommonMsg.temp_problem)
+
+    except EduIDUserDBError:
+        return error_response(payload=dict(status='unknown-code'), message=SignupMsg.unknown_code)
+
     return complete_registration(user)
+
+
+@signup_views.route('/get-code', methods=['GET'])
+def get_email_code():
+    """
+    Backdoor to get the email verification code in the staging or dev environments
+    """
+    try:
+        if check_magic_cookie(current_app.config):
+            email = request.args.get('email')
+            signup_user = current_app.private_userdb.get_user_by_pending_mail_address(email)
+            code = signup_user.pending_mail_address.verification_code
+            return code
+    except Exception:
+        current_app.logger.exception("Someone tried to use the backdoor to get the email verification code for signup")
+
+    abort(400)

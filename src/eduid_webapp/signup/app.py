@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2016 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -34,28 +35,29 @@ from typing import cast
 
 from flask import current_app
 
-from eduid_common.api import am
-from eduid_common.api import mail_relay
-from eduid_common.api import translation
+from eduid_common.api import am, mail_relay, translation
 from eduid_common.api.app import EduIDBaseApp
-from eduid_common.api.app import get_app_config
 from eduid_userdb.logs import ProofingLog
 from eduid_userdb.signup import SignupUserDB
+
 from eduid_webapp.signup.settings.common import SignupConfig
 
 
 class SignupApp(EduIDBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(SignupApp, self).__init__(name, SignupConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = SignupConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: SignupConfig = cast(SignupConfig, self.config)  # type: ignore
 
         from eduid_webapp.signup.views import signup_views
+
         self.register_blueprint(signup_views)
 
-        self = am.init_relay(self, 'eduid_signup')
-        self = mail_relay.init_relay(self)
-        self = translation.init_babel(self)
+        am.init_relay(self, 'eduid_signup')
+        mail_relay.init_relay(self)
+        translation.init_babel(self)
 
         self.private_userdb = SignupUserDB(self.config.mongo_uri, 'eduid_signup')
         self.proofing_log = ProofingLog(self.config.mongo_uri)

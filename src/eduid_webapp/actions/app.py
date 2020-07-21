@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2018 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -35,18 +36,16 @@ import types
 from importlib import import_module
 from typing import cast
 
-from flask import current_app
-from flask import render_template, templating
+from flask import current_app, render_template, templating
 
 from eduid_common.api import am
 from eduid_common.api.app import EduIDBaseApp
-from eduid_common.api.app import get_app_config
 from eduid_userdb.actions import ActionDB
+
 from eduid_webapp.actions.settings.common import ActionsConfig
 
 
 class PluginsRegistry(dict):
-
     def __init__(self, app):
         super(PluginsRegistry, self).__init__()
         for plugin_name in app.config.action_plugins:
@@ -74,15 +73,18 @@ def _get_tous(app, version=None):
 
 
 class ActionsApp(EduIDBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(ActionsApp, self).__init__(name, ActionsConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = ActionsConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: ActionsConfig = cast(ActionsConfig, self.config)  # type: ignore
 
         from eduid_webapp.actions.views import actions_views
+
         self.register_blueprint(actions_views)
 
-        self = am.init_relay(self, f'eduid_{name}')
+        am.init_relay(self, f'eduid_{name}')
 
         self.actions_db = ActionDB(self.config.mongo_uri)
 
@@ -92,7 +94,9 @@ class ActionsApp(EduIDBaseApp):
 
         self.get_tous = types.MethodType(_get_tous, self)
 
+
 current_actions_app: ActionsApp = cast(ActionsApp, current_app)
+
 
 def actions_init_app(name: str, config: dict) -> ActionsApp:
     """

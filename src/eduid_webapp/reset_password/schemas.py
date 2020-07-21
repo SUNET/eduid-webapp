@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -30,84 +30,60 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-import math
-
-import zxcvbn
-from flask_babel import gettext as _
-from marshmallow import fields, Schema, validates, validates_schema, validate, ValidationError
+from marshmallow import ValidationError, fields, validates
 
 from eduid_common.api.schemas.base import EduidSchema, FluxStandardAction
-from eduid_common.api.schemas.csrf import CSRFResponseMixin, CSRFRequestMixin
+from eduid_common.api.schemas.csrf import CSRFRequestMixin, CSRFResponseMixin
+from eduid_common.api.schemas.password import PasswordSchema
 from eduid_common.api.schemas.validators import validate_email
+
+from eduid_webapp.reset_password.helpers import ResetPwMsg
 from eduid_webapp.security.schemas import CredentialSchema
 
 __author__ = 'eperez'
 
 
-class ResetPasswordInitSchema(CSRFRequestMixin):
+class ResetPasswordInitSchema(EduidSchema, CSRFRequestMixin):
 
     email = fields.String(required=True)
 
     @validates('email')
-    def validate_email_field(self, value):
+    def validate_email_field(self, value, **kwargs):
         # Set a new error message
         try:
             validate_email(value)
         except ValidationError:
-            raise ValidationError(_('Invalid email address'))
+            raise ValidationError(ResetPwMsg.invalid_email.value)
 
 
-class ResetPasswordEmailCodeSchema(CSRFRequestMixin):
+class ResetPasswordEmailCodeSchema(EduidSchema, CSRFRequestMixin):
 
     code = fields.String(required=True)
 
 
-class ResetPasswordExtraSecSchema(CSRFRequestMixin):
+class ResetPasswordExtraSecPhoneSchema(EduidSchema, CSRFRequestMixin):
 
     code = fields.String(required=True)
     phone_index = fields.Integer(required=True)
 
 
-class ResetPasswordWithCodeSchema(CSRFRequestMixin):
-    
+class ResetPasswordWithCodeSchema(EduidSchema, CSRFRequestMixin):
+
     code = fields.String(required=True)
     password = fields.String(required=True)
 
-    @validates('password')
-    def validate_password(self, value):
-        # Set a new error message
-        try:
-            self._validate_password(value)
-        except ValidationError:
-            raise ValidationError(_('Please use a stronger password'))
-
-    def _validate_password(self, password):
-        """
-        :param password: New password
-        :type password: string_types
-
-        :return: True|ValidationError
-        :rtype: Boolean|ValidationError
-
-        Checks the complexity of the password
-        """
-        # Remove whitespace
-        password = ''.join(password.split())
-
-        # Reject blank passwords
-        if not password:
-            raise ValidationError('The password complexity is too weak.')
-
-        # Check password complexity with zxcvbn
-        from eduid_webapp.reset_password.app import current_reset_password_app
-        min_entropy = current_reset_password_app.config.password_entropy
-        result = zxcvbn.zxcvbn(password)
-        if math.log(result.get('guesses', 1), 2) < min_entropy:
-            raise ValidationError('The password complexity is too weak.')
-
 
 class ResetPasswordWithPhoneCodeSchema(ResetPasswordWithCodeSchema):
+
     phone_code = fields.String(required=True)
+
+
+class ResetPasswordWithSecTokenSchema(ResetPasswordWithCodeSchema):
+
+    credentialId = fields.String(required=True)
+    authenticatorData = fields.String(required=True)
+    clientDataJSON = fields.String(required=True)
+    signature = fields.String(required=True)
 
 
 class ChpassCredentialList(EduidSchema, CSRFResponseMixin):
@@ -119,7 +95,7 @@ class ChpassResponseSchema(FluxStandardAction):
     payload = fields.Nested(ChpassCredentialList)
 
 
-class ChangePasswordSchema(EduidSchema, CSRFRequestMixin):
+class ChpassRequestSchema(EduidSchema, CSRFRequestMixin):
 
     old_password = fields.String(required=True)
     new_password = fields.String(required=True)
@@ -132,4 +108,22 @@ class SuggestedPassword(EduidSchema, CSRFResponseMixin):
 
 class SuggestedPasswordResponseSchema(FluxStandardAction):
 
-    payload = SuggestedPassword()
+    payload = fields.Nested(SuggestedPassword, many=False)
+
+
+class NewPasswordSecurePhoneRequestSchema(EduidSchema, CSRFRequestMixin):
+
+    code = fields.String(required=True)
+    password = fields.String(required=True)
+    phone_code = fields.String(required=True)
+
+
+class NewPasswordSecureTokenRequestSchema(EduidSchema, CSRFRequestMixin):
+
+    code = fields.String(required=True)
+    password = fields.String(required=True)
+    tokenResponse = fields.String(required=False)
+    authenticatorData = fields.String(required=False)
+    clientDataJSON = fields.String(required=False)
+    credentialId = fields.String(required=False)
+    signature = fields.String(required=False)

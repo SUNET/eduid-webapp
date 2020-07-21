@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -31,46 +31,49 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 import math
-from enum import Enum, unique
-from typing import Optional
+from enum import unique
+from typing import Any, Dict, List, Optional, TypeVar, Union
 
 import bcrypt
-from flask import url_for
 from flask import render_template
 from flask_babel import gettext as _
 
-from eduid_userdb.exceptions import UserHasNotCompletedSignup
-from eduid_userdb.exceptions import DocumentDoesNotExist
-from eduid_userdb.reset_password import ResetPasswordUser
-from eduid_userdb.reset_password import ResetPasswordState
-from eduid_userdb.reset_password import ResetPasswordEmailState
-from eduid_userdb.reset_password import ResetPasswordEmailAndPhoneState
-from eduid_userdb.logs import MailAddressProofing
-from eduid_userdb.logs import PhoneNumberProofing
-from eduid_userdb.user import User
 from eduid_common.api.exceptions import MailTaskFailed
-from eduid_common.api.utils import save_and_sync_user
-from eduid_common.api.utils import get_unique_hash
-from eduid_common.api.utils import get_short_hash
 from eduid_common.api.helpers import send_mail
+from eduid_common.api.messages import TranslatableMsg
+from eduid_common.api.utils import get_short_hash, get_unique_hash, save_and_sync_user, urlappend
+from eduid_common.authn import fido_tokens
 from eduid_common.authn.utils import generate_password
 from eduid_common.authn.vccs import reset_password
 from eduid_common.session import session
+from eduid_userdb.exceptions import DocumentDoesNotExist, UserHasNotCompletedSignup
+from eduid_userdb.logs import MailAddressProofing, PhoneNumberProofing
+from eduid_userdb.reset_password import (
+    ResetPasswordEmailAndPhoneState,
+    ResetPasswordEmailState,
+    ResetPasswordState,
+    ResetPasswordUser,
+)
+from eduid_userdb.user import User
+
 from eduid_webapp.reset_password.app import current_reset_password_app as current_app
 
 
 @unique
-class ResetPwMsg(Enum):
+class ResetPwMsg(TranslatableMsg):
     """
     Messages sent to the front end with information on the results of the
     attempted operations on the back end.
     """
+
     # The user has sent a code that corresponds to no known password reset
     # request
     unknown_code = 'resetpw.unknown-code'
+    # Some required input data is empty
+    missing_data = 'resetpw.missing-data'
     # The user has sent an SMS'ed code that corresponds to no known password
     # reset request
-    unkown_phone_code = 'resetpw.phone-code-unknown'
+    unknown_phone_code = 'resetpw.phone-code-unknown'
     # The user has sent a code that has expired
     expired_email_code = 'resetpw.expired-email-code'
     # The user has sent an SMS'ed code that has expired
@@ -82,6 +85,8 @@ class ResetPwMsg(Enum):
     # The password has been successfully resetted
     pw_resetted = 'resetpw.pw-resetted'
     # There was some problem sending the SMS with the (extra security) code.
+    send_sms_throttled = 'resetpw.sms-throttled'
+    # Sending the SMS with the (extra security) code has been throttled.
     send_sms_failure = 'resetpw.sms-failed'
     # A new (extra security) code has been generated and sent by SMS
     # successfully
@@ -101,8 +106,25 @@ class ResetPwMsg(Enum):
     stale_reauthn = 'chpass.stale_reauthn'
     # The old password sent is not recognized
     unrecognized_pw = 'chpass.unable-to-verify-old-password'
-    # The user is out of sync with the db, user needs to reload
-    out_of_sync = 'user-out-of-sync'
+    # the user has chosen extra security with a security key but has failed to
+    # produce evidence of it.
+    hwtoken_fail = 'security-key-fail'
+    # invalid state, without a code
+    state_no_key = 'chpass.no-code-in-data'
+    # The password chosen is too weak
+    chpass_weak = 'chpass.weak-password'
+    # Not enough data to change the password
+    chpass_no_data = 'chpass.no-data'
+    # No webauthn data in the request
+    mfa_no_data = 'mfa.no-request-data'
+    # extra security with fido tokens failed - wrong token
+    fido_token_fail = 'resetpw.fido-token-fail'
+    # The password chosen is too weak
+    resetpw_weak = 'resetpw.weak-password'
+    # email address validation error
+    invalid_email = 'Invalid email address'
+    # password successfully changed
+    chpass_password_changed = 'chpass.password-changed'
 
 
 class BadCode(Exception):
@@ -110,25 +132,11 @@ class BadCode(Exception):
     Exception to signal that the password reset code received is not valid.
     """
 
-    def __init__(self, msg: ResetPwMsg):
+    def __init__(self, msg: TranslatableMsg):
         self.msg = msg
 
 
-def success_message(message: ResetPwMsg) -> dict:
-    return {
-        '_status': 'ok',
-        'message': str(message.value)
-    }
-
-
-def error_message(message: ResetPwMsg) -> dict:
-    return {
-        '_status': 'error',
-        'message': str(message.value)
-    }
-
-
-def get_pwreset_state(email_code: str) -> ResetPasswordState:
+def get_pwreset_state(email_code: str) -> Union[ResetPasswordEmailState, ResetPasswordEmailAndPhoneState]:
     """
     get the password reset state for the provided code
 
@@ -137,8 +145,9 @@ def get_pwreset_state(email_code: str) -> ResetPasswordState:
     mail_expiration_time = current_app.config.email_code_timeout
     sms_expiration_time = current_app.config.phone_code_timeout
     try:
-        state = current_app.password_reset_state_db.get_state_by_email_code(email_code)
+        state = current_app.password_reset_state_db.get_state_by_email_code(email_code, raise_on_missing=True)
         current_app.logger.debug(f'Found state using email_code {email_code}: {state}')
+        assert state is not None  # assure mypy, raise_on_missing=True will make this never happen
     except DocumentDoesNotExist:
         current_app.logger.info(f'State not found: {email_code}')
         raise BadCode(ResetPwMsg.unknown_code)
@@ -151,8 +160,9 @@ def get_pwreset_state(email_code: str) -> ResetPasswordState:
         current_app.logger.info(f'Phone code expired for state: {email_code}')
         # Revert the state to EmailState to allow the user to choose extra security again
         current_app.password_reset_state_db.remove_state(state)
-        state = ResetPasswordEmailState(eppn=state.eppn, email_address=state.email_address,
-                                        email_code=state.email_code)
+        state = ResetPasswordEmailState(
+            eppn=state.eppn, email_address=state.email_address, email_code=state.email_code.code
+        )
         current_app.password_reset_state_db.save(state)
         raise BadCode(ResetPwMsg.expired_sms_code)
 
@@ -167,36 +177,33 @@ def send_password_reset_mail(email_address: str):
         user = current_app.central_userdb.get_user_by_mail(email_address)
     except UserHasNotCompletedSignup:
         # Old bug where incomplete signup users where written to the central db
-        current_app.logger.info(f"Cannot reset a password with the following "
-                                f"email address: {email_address}: incomplete user")
+        current_app.logger.info(
+            f"Cannot reset a password with the following " f"email address: {email_address}: incomplete user"
+        )
         raise BadCode(ResetPwMsg.invalid_user)
     except DocumentDoesNotExist:
-        current_app.logger.info(f"Cannot reset a password with the following "
-                                f"unknown email address: {email_address}.")
+        current_app.logger.info(
+            f"Cannot reset a password with the following " f"unknown email address: {email_address}."
+        )
         raise BadCode(ResetPwMsg.user_not_found)
 
-    state = ResetPasswordEmailState(eppn=user.eppn,
-                                    email_address=email_address,
-                                    email_code=get_unique_hash())
+    state = ResetPasswordEmailState(eppn=user.eppn, email_address=email_address, email_code=get_unique_hash())
     current_app.password_reset_state_db.save(state)
+
     text_template = 'reset_password_email.txt.jinja2'
     html_template = 'reset_password_email.html.jinja2'
     to_addresses = [address.email for address in user.mail_addresses.verified.to_list()]
 
     pwreset_timeout = current_app.config.email_code_timeout // 60 // 60  # seconds to hours
-    context = {
-        'reset_password_link': url_for('reset_password.set_new_pw',
-                                       email_code=state.email_code.code,
-                                       _external=True),
-        'password_reset_timeout': pwreset_timeout
-    }
+    # We must send the user to an url that does not correspond to a flask view,
+    # but to a js bundle (i.e. a flask view in a *different* app)
+    resetpw_link = urlappend(current_app.config.password_reset_link, f"code/{state.email_code.code}")
+    context = {'reset_password_link': resetpw_link, 'password_reset_timeout': pwreset_timeout}
     subject = _('Reset password')
     try:
-        send_mail(subject, to_addresses, text_template,
-                  html_template, current_app, context, state.reference)
+        send_mail(subject, to_addresses, text_template, html_template, current_app, context, state.reference)
     except MailTaskFailed as error:
-        current_app.logger.error(f'Sending password reset e-mail for '
-                                 f'{email_address} failed: {error}')
+        current_app.logger.error(f'Sending password reset e-mail for ' f'{email_address} failed: {error}')
         raise BadCode(ResetPwMsg.send_pw_failure)
 
     current_app.logger.info(f'Sent password reset email to user {user}')
@@ -210,7 +217,7 @@ def generate_suggested_password() -> str:
     password_length = current_app.config.password_length
 
     password = generate_password(length=password_length)
-    password = ' '.join([password[i*4: i*4+4] for i in range(0, math.ceil(len(password)/4))])
+    password = ' '.join([password[i * 4 : i * 4 + 4] for i in range(0, math.ceil(len(password) / 4))])
 
     return password
 
@@ -280,25 +287,39 @@ def reset_user_password(user: User, state: ResetPasswordState, password: str):
                 nin.is_verified = False
                 current_app.logger.debug(f'NIN {nin.number} unverified')
 
-    reset_password_user = reset_password(reset_password_user, new_password=password,
-                                         is_generated=state.generated_password,
-                                         application='security', vccs_url=vccs_url)
+    is_generated = state.generated_password if isinstance(state.generated_password, bool) else False
+
+    reset_password_user = reset_password(
+        reset_password_user,
+        new_password=password,
+        is_generated=is_generated,
+        application='security',
+        vccs_url=vccs_url,
+    )
     reset_password_user.terminated = False
     save_and_sync_user(reset_password_user)
     current_app.stats.count(name='security_password_reset', value=1)
     current_app.logger.info(f'Reset password successful for user {reset_password_user}')
 
 
-def get_extra_security_alternatives(user: User) -> dict:
+def get_extra_security_alternatives(user: User, session_prefix: str) -> dict:
     """
     :param user: The user
     :return: Dict of alternatives
     """
-    alternatives = {}
+    alternatives: Dict[str, Any] = {}
 
     if user.phone_numbers.verified.count:
-        verified_phone_numbers = [item.number for item in user.phone_numbers.verified.to_list()]
+        verified_phone_numbers = [
+            {'number': item.number, 'index': n} for n, item in enumerate(user.phone_numbers.verified.to_list())
+        ]
         alternatives['phone_numbers'] = verified_phone_numbers
+
+    credentials = fido_tokens.get_user_credentials(user)
+
+    if credentials:
+        alternatives['tokens'] = fido_tokens.start_token_verification(user, session_prefix)
+
     return alternatives
 
 
@@ -311,8 +332,9 @@ def mask_alternatives(alternatives: dict) -> dict:
         # Phone numbers
         masked_phone_numbers = []
         for phone_number in alternatives.get('phone_numbers', []):
-            masked_number = '{}{}'.format('X'*(len(phone_number)-2), phone_number[len(phone_number)-2:])
-            masked_phone_numbers.append(masked_number)
+            number = phone_number['number']
+            masked_number = '{}{}'.format('X' * (len(number) - 2), number[len(number) - 2 :])
+            masked_phone_numbers.append({'number': masked_number, 'index': phone_number['index']})
 
         alternatives['phone_numbers'] = masked_phone_numbers
     return alternatives
@@ -322,16 +344,18 @@ def verify_email_address(state: ResetPasswordEmailState) -> bool:
     """
     :param state: Password reset state
     """
-    user = current_app.central_userdb.get_user_by_eppn(state.eppn,
-                                                       raise_on_missing=False)
+    user = current_app.central_userdb.get_user_by_eppn(state.eppn, raise_on_missing=False)
     if not user:
         current_app.logger.error(f'Could not find user {user}')
         return False
 
-    proofing_element = MailAddressProofing(user, created_by='security',
-                                           mail_address=state.email_address,
-                                           reference=state.reference,
-                                           proofing_version='2013v1')
+    proofing_element = MailAddressProofing(
+        user,
+        created_by='security',
+        mail_address=state.email_address,
+        reference=state.reference,
+        proofing_version='2013v1',
+    )
 
     if current_app.proofing_log.save(proofing_element):
         state.email_code.is_verified = True
@@ -343,22 +367,20 @@ def verify_email_address(state: ResetPasswordEmailState) -> bool:
 
 
 def send_verify_phone_code(state: ResetPasswordEmailState, phone_number: str):
-    state = ResetPasswordEmailAndPhoneState.from_email_state(state,
-                                            phone_number=phone_number,
-                                            phone_code=get_short_hash())
-    current_app.password_reset_state_db.save(state)
+    phone_state = ResetPasswordEmailAndPhoneState.from_email_state(
+        state, phone_number=phone_number, phone_code=get_short_hash()
+    )
+    current_app.password_reset_state_db.save(phone_state)
+
     template = 'reset_password_sms.txt.jinja2'
-    context = {
-        'verification_code': state.phone_code.code
-    }
-    send_sms(state.phone_number, template, context, state.reference)
+    context = {'verification_code': phone_state.phone_code.code}
+    send_sms(phone_state.phone_number, template, context, phone_state.reference)
     current_app.logger.info(f'Sent password reset sms to user with eppn: {state.eppn}')
-    current_app.logger.debug(f'Phone number: {state.phone_number}')
+    current_app.logger.debug(f'Sent password reset sms with code: {phone_state.phone_code.code}')
+    current_app.logger.debug(f'Phone number: {phone_state.phone_number}')
 
 
-def send_sms(phone_number: str, text_template: str,
-             context: Optional[dict] = None,
-             reference: Optional[str] = None):
+def send_sms(phone_number: str, text_template: str, context: Optional[dict] = None, reference: Optional[str] = None):
     """
     :param phone_number: the recipient of the sms
     :param text_template: message as a jinja template
@@ -382,16 +404,18 @@ def verify_phone_number(state: ResetPasswordEmailAndPhoneState) -> bool:
     :param state: Password reset state
     """
 
-    user = current_app.central_userdb.get_user_by_eppn(state.eppn,
-                                                       raise_on_missing=False)
+    user = current_app.central_userdb.get_user_by_eppn(state.eppn, raise_on_missing=False)
     if not user:
         current_app.logger.error(f'Could not find user {user}')
         return False
 
-    proofing_element = PhoneNumberProofing(user, created_by='security',
-                                           phone_number=state.phone_number,
-                                           reference=state.reference,
-                                           proofing_version='2013v1')
+    proofing_element = PhoneNumberProofing(
+        user,
+        created_by='security',
+        phone_number=state.phone_number,
+        reference=state.reference,
+        proofing_version='2013v1',
+    )
     if current_app.proofing_log.save(proofing_element):
         state.phone_code.is_verified = True
         current_app.password_reset_state_db.save(state)
@@ -421,3 +445,32 @@ def compile_credential_list(user: ResetPasswordUser) -> list:
         credential_dict.update(authn_info[credential.key])
         credentials.append(credential_dict)
     return credentials
+
+
+# TODO: Change this function to accepting a User instead of an eppn,
+#       since we probably already have a user loaded where this function is called
+def get_zxcvbn_terms(eppn: str) -> List[str]:
+    """
+    Combine known data that is bad for a password to a list for zxcvbn.
+
+    :param eppn: User eppn
+    :return: List of user info
+    """
+    user = current_app.central_userdb.get_user_by_eppn(eppn, raise_on_missing=True)
+    user_input = list()
+
+    # Personal info
+    if user.display_name:
+        for part in user.display_name.split():
+            user_input.append(''.join(part.split()))
+    if user.given_name:
+        user_input.append(user.given_name)
+    if user.surname:
+        user_input.append(user.surname)
+
+    # Mail addresses
+    if user.mail_addresses.count:
+        for item in user.mail_addresses.to_list():
+            user_input.append(item.email.split('@')[0])
+
+    return user_input

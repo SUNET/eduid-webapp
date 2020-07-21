@@ -2,14 +2,20 @@
 from __future__ import absolute_import
 
 import datetime
+import json
+from typing import Any, Optional
+from urllib.parse import quote_plus
 
-from eduid_common.api.exceptions import MsgTaskFailed, MailTaskFailed
+from flask import url_for
 from mock import patch
+
+from eduid_common.api.exceptions import MailTaskFailed, MsgTaskFailed
 from eduid_common.api.testing import EduidAPITestCase
 from eduid_common.authn.testing import TestVCCSClient
 from eduid_userdb.credentials import Password
 from eduid_userdb.exceptions import DocumentDoesNotExist
 from eduid_userdb.security import PasswordResetEmailState
+
 from eduid_webapp.security.app import security_init_app
 from eduid_webapp.security.settings.common import SecurityConfig
 
@@ -17,9 +23,9 @@ __author__ = 'lundberg'
 
 
 class SecurityResetPasswordTests(EduidAPITestCase):
-
     def setUp(self):
         self.test_user_eppn = 'hubba-bubba'
+        self.test_user_email = 'johnsmith@example.com'
         super(SecurityResetPasswordTests, self).setUp()
 
     def load_app(self, config):
@@ -30,29 +36,31 @@ class SecurityResetPasswordTests(EduidAPITestCase):
         return security_init_app('testing', config)
 
     def update_config(self, app_config):
-        app_config.update({
-            'available_languages': {'en': 'English', 'sv': 'Svenska'},
-            'msg_broker_url': 'amqp://dummy',
-            'am_broker_url': 'amqp://dummy',
-            'celery_config': {
-                'result_backend': 'amqp',
-                'task_serializer': 'json'
-            },
-            'vccs_url': 'http://vccs',
-            'email_code_timeout': 7200,
-            'phone_code_timeout': 600,
-            'password_entropy': 25
-        })
+        app_config.update(
+            {
+                'available_languages': {'en': 'English', 'sv': 'Svenska'},
+                'msg_broker_url': 'amqp://dummy',
+                'am_broker_url': 'amqp://dummy',
+                'celery_config': {'result_backend': 'amqp', 'task_serializer': 'json'},
+                'vccs_url': 'http://vccs',
+                'email_code_timeout': 7200,
+                'phone_code_timeout': 600,
+                'password_entropy': 25,
+                'no_authn_urls': [r'/reset.*'],
+            }
+        )
         return SecurityConfig(**app_config)
+
+    def tearDown(self):
+        super(SecurityResetPasswordTests, self).tearDown()
+        with self.app.app_context():
+            self.app.central_userdb._drop_whole_collection()
 
     def post_email_address(self, email_address):
         with self.app.test_client() as c:
             c.get('/reset-password/')
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'email': email_address
-                }
+                data = {'csrf': sess.get_csrf_token(), 'email': email_address}
             response = c.post('/reset-password/', data=data)
             self.assertEqual(response.status_code, 200)
         return response
@@ -62,18 +70,17 @@ class SecurityResetPasswordTests(EduidAPITestCase):
             response = c.get('/reset-password/email/{}'.format(state.email_code.code))
 
             self.assertEqual(response.status_code, 302)
-            self.assertEqual(response.location, 'http://{}/reset-password/extra-security/{}'.format(
-                             self.app.config.server_name, state.email_code.code))
+            self.assertEqual(
+                response.location,
+                'http://{}/reset-password/extra-security/{}'.format(self.app.config.server_name, state.email_code.code),
+            )
             self.assertEqual(self.app.proofing_log.db_count(), 1)
 
     def choose_extra_security_phone_number(self, state):
         with self.app.test_client() as c:
             c.get('/reset-password/extra-security/{}'.format(state.email_code.code))
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'phone_number_index': '0'
-                }
+                data = {'csrf': sess.get_csrf_token(), 'phone_number_index': '0'}
             response = c.post('/reset-password/extra-security/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 302)
 
@@ -81,10 +88,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
         with self.app.test_client() as c:
             c.get('/reset-password/extra-security/{}'.format(state.email_code.code))
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'no_extra_security': 'true'
-                }
+                data = {'csrf': sess.get_csrf_token(), 'no_extra_security': 'true'}
             response = c.post('/reset-password/extra-security/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 302)
 
@@ -98,10 +102,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
             c.get('/reset-password/extra-security/phone/{}'.format(state.email_code.code))
 
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'phone_code': state.phone_code.code
-                }
+                data = {'csrf': sess.get_csrf_token(), 'phone_code': state.phone_code.code}
             response = c.post('/reset-password/extra-security/phone/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 302)
             self.assertEqual(self.app.proofing_log.db_count(), 2)
@@ -110,10 +111,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
         with self.app.test_client() as c:
             c.get('/reset-password/new-password/{}'.format(state.email_code.code))
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'use_generated_password': 'true'
-                }
+                data = {'csrf': sess.get_csrf_token(), 'use_generated_password': 'true'}
             response = c.post('/reset-password/new-password/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 200)
 
@@ -127,7 +125,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
                 data = {
                     'csrf': sess.get_csrf_token(),
                     'custom_password': 'a_pretty_long_password',
-                    'repeat_password': 'a_pretty_long_password'
+                    'repeat_password': 'a_pretty_long_password',
                 }
             response = c.post('/reset-password/new-password/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 200)
@@ -259,10 +257,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
         with self.app.test_client() as c:
             c.get('/reset-password/extra-security/{}'.format(state.email_code.code))
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'phone_number_index': '0'
-                }
+                data = {'csrf': sess.get_csrf_token(), 'phone_number_index': '0'}
             response = c.post('/reset-password/extra-security/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 200)
             self.assertIn(b'Temporary technical problem', response.data)
@@ -275,8 +270,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_with_extra_security_phone(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                                      mock_get_vccs_client):
+    def test_reset_password_with_extra_security_phone(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -303,8 +299,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_with_extra_security_phone_expired(self, mock_request_user_sync, mock_sendsms,
-                                                              mock_sendmail, mock_get_vccs_client):
+    def test_reset_password_with_extra_security_phone_expired(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -335,8 +332,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_with_no_extra_security(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                                   mock_get_vccs_client):
+    def test_reset_password_with_no_extra_security(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -363,8 +361,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_with_no_extra_security_available(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                                             mock_get_vccs_client):
+    def test_reset_password_with_no_extra_security_available(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -397,8 +396,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_custom_password_with_extra_security_phone(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                                             mock_get_vccs_client):
+    def test_reset_custom_password_with_extra_security_phone(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -425,8 +425,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_custom_password_with_no_extra_security(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                                          mock_get_vccs_client):
+    def test_reset_custom_password_with_no_extra_security(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -453,8 +454,9 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_low_entropy(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                        mock_get_vccs_client):
+    def test_reset_password_low_entropy(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -471,11 +473,7 @@ class SecurityResetPasswordTests(EduidAPITestCase):
         with self.app.test_client() as c:
             c.get('/reset-password/new-password/{}'.format(state.email_code.code))
             with c.session_transaction() as sess:
-                data = {
-                    'csrf': sess.get_csrf_token(),
-                    'custom_password': 'bad',
-                    'repeat_password': 'bad'
-                }
+                data = {'csrf': sess.get_csrf_token(), 'custom_password': 'bad', 'repeat_password': 'bad'}
             response = c.post('/reset-password/new-password/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 200)
 
@@ -495,8 +493,48 @@ class SecurityResetPasswordTests(EduidAPITestCase):
     @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
     @patch('eduid_common.api.msg.MsgRelay.sendsms')
     @patch('eduid_common.api.am.AmRelay.request_user_sync')
-    def test_reset_password_blank_password(self, mock_request_user_sync, mock_sendsms, mock_sendmail,
-                                           mock_get_vccs_client):
+    def test_reset_password_blank_password(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
+        mock_request_user_sync.side_effect = self.request_user_sync
+        mock_sendsms.return_value = True
+        mock_sendmail.return_value = True
+        mock_get_vccs_client.return_value = TestVCCSClient()
+
+        user = self.app.central_userdb.get_user_by_eppn(self.test_user_eppn)
+        old_password = user.credentials.filter(Password).to_list()[0]
+
+        self.post_email_address('johnsmith@example.com')
+        state = self.app.password_reset_state_db.get_state_by_eppn(self.test_user_eppn)
+        self.verify_email_address(state)
+        self.choose_no_extra_security(state)
+
+        with self.app.test_client() as c:
+            c.get('/reset-password/new-password/{}'.format(state.email_code.code))
+            with c.session_transaction() as sess:
+                data = {'csrf': sess.get_csrf_token(), 'custom_password': '', 'repeat_password': ''}
+            response = c.post('/reset-password/new-password/{}'.format(state.email_code.code), data=data)
+            self.assertEqual(response.status_code, 200)
+
+        state = self.app.password_reset_state_db.get_state_by_eppn(self.test_user_eppn)
+        self.assertIsNotNone(state)
+
+        # Check that nothing changed
+        user = self.app.central_userdb.get_user_by_eppn(self.test_user_eppn)
+        self.assertEqual(user.credentials.filter(Password).count, 1)
+        self.assertEqual(user.credentials.filter(Password).to_list()[0].key, old_password.key)
+        for nin in user.nins.verified.to_list():
+            self.assertEqual(nin.is_verified, True)
+        for phone_number in user.phone_numbers.verified.to_list():
+            self.assertEqual(phone_number.is_verified, True)
+
+    @patch('eduid_common.authn.vccs.get_vccs_client')
+    @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
+    @patch('eduid_common.api.msg.MsgRelay.sendsms')
+    @patch('eduid_common.api.am.AmRelay.request_user_sync')
+    def test_reset_password_blank_repeat_password(
+        self, mock_request_user_sync, mock_sendsms, mock_sendmail, mock_get_vccs_client
+    ):
         mock_request_user_sync.side_effect = self.request_user_sync
         mock_sendsms.return_value = True
         mock_sendmail.return_value = True
@@ -515,8 +553,8 @@ class SecurityResetPasswordTests(EduidAPITestCase):
             with c.session_transaction() as sess:
                 data = {
                     'csrf': sess.get_csrf_token(),
-                    'custom_password': '',
-                    'repeat_password': ''
+                    'custom_password': 'a_pretty_long_password',
+                    'repeat_password': '',
                 }
             response = c.post('/reset-password/new-password/{}'.format(state.email_code.code), data=data)
             self.assertEqual(response.status_code, 200)
@@ -532,3 +570,109 @@ class SecurityResetPasswordTests(EduidAPITestCase):
             self.assertEqual(nin.is_verified, True)
         for phone_number in user.phone_numbers.verified.to_list():
             self.assertEqual(phone_number.is_verified, True)
+
+    @patch('eduid_common.authn.vccs.get_vccs_client')
+    @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
+    @patch('eduid_common.api.am.AmRelay.request_user_sync')
+    @patch('eduid_common.api.msg.MsgRelay.sendsms')
+    def _get_code_backdoor(
+        self,
+        mock_sendsms: Any,
+        mock_request_user_sync: Any,
+        mock_sendmail: Any,
+        mock_get_vccs_client: Any,
+        cookie_name='magic',
+        cookie_value='magic-cookie',
+        environment='dev',
+    ):
+        mock_request_user_sync.side_effect = self.request_user_sync
+        mock_sendmail.return_value = True
+        mock_get_vccs_client.return_value = TestVCCSClient()
+        mock_sendsms.return_value = True
+
+        self.app.config.magic_cookie = cookie_value
+        self.app.config.magic_cookie_name = cookie_name
+        self.app.config.environment = environment
+
+        self.post_email_address('johnsmith@example.com')
+
+        eppn = quote_plus(self.test_user_eppn)
+
+        with self.app.test_client() as c:
+            c.set_cookie('localhost', key='magic', value='magic-cookie')
+            return c.get(f'/reset-password/get-email-code?eppn={eppn}')
+
+    def test_get_code_backdoor(self):
+        resp = self._get_code_backdoor()
+
+        self.assertEqual(resp.status_code, 200)
+        state = self.app.password_reset_state_db.get_state_by_eppn(self.test_user_eppn)
+        self.assertEqual(resp.data, state.email_code.code.encode('ascii'))
+
+    def test_get_code_no_backdoor_in_pro(self):
+        resp = self._get_code_backdoor(environment='pro')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_code_no_backdoor_misconfigured1(self):
+        resp = self._get_code_backdoor(cookie_name='')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_code_no_backdoor_misconfigured2(self):
+        resp = self._get_code_backdoor(cookie_value='')
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('eduid_common.authn.vccs.get_vccs_client')
+    @patch('eduid_common.api.mail_relay.MailRelay.sendmail')
+    @patch('eduid_common.api.msg.MsgRelay.sendsms')
+    @patch('eduid_common.api.am.AmRelay.request_user_sync')
+    def _get_phone_code_backdoor(
+        self,
+        mock_request_user_sync,
+        mock_sendsms,
+        mock_sendmail,
+        mock_get_vccs_client,
+        cookie_name='magic',
+        cookie_value='magic-cookie',
+        environment='dev',
+    ):
+        mock_request_user_sync.side_effect = self.request_user_sync
+        mock_sendsms.return_value = True
+        mock_sendmail.return_value = True
+        mock_get_vccs_client.return_value = TestVCCSClient()
+
+        self.app.config.magic_cookie = cookie_value
+        self.app.config.magic_cookie_name = cookie_name
+        self.app.config.environment = environment
+
+        self.post_email_address('johnsmith@example.com')
+        state = self.app.password_reset_state_db.get_state_by_eppn(self.test_user_eppn)
+        self.verify_email_address(state)
+        self.choose_extra_security_phone_number(state)
+        state = self.app.password_reset_state_db.get_state_by_email_code(state.email_code.code)
+        self.verify_phone_number(state)
+        eppn = quote_plus(self.test_user_eppn)
+
+        with self.app.test_client() as c:
+            c.set_cookie('localhost', key='magic', value='magic-cookie')
+            return c.get(f'/reset-password/get-phone-code?eppn={eppn}')
+
+    def test_get_phone_code_backdoor(self):
+        resp = self._get_phone_code_backdoor()
+
+        state = self.app.password_reset_state_db.get_state_by_eppn(self.test_user_eppn)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data, state.phone_code.code.encode('ascii'))
+
+    def test_get_phone_code_no_backdoor_in_pro(self):
+        resp = self._get_phone_code_backdoor(environment='pro')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_phone_code_no_backdoor_misconfigured1(self):
+        resp = self._get_phone_code_backdoor(cookie_name='')
+
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_phone_code_no_backdoor_misconfigured2(self):
+        resp = self._get_phone_code_backdoor(cookie_value='')
+
+        self.assertEqual(resp.status_code, 400)

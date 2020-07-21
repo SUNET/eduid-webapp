@@ -32,9 +32,11 @@
 #
 
 from marshmallow import fields, pre_load
-from eduid_common.api.schemas.base import FluxStandardAction, EduidSchema
-from eduid_common.api.schemas.csrf import CSRFResponseMixin, CSRFRequestMixin
-from eduid_webapp.phone.validators import validate_phone, validate_format_phone, normalize_to_e_164
+
+from eduid_common.api.schemas.base import EduidSchema, FluxStandardAction
+from eduid_common.api.schemas.csrf import CSRFRequestMixin, CSRFResponseMixin
+
+from eduid_webapp.phone.validators import normalize_to_e_164, validate_format_phone, validate_phone
 
 __author__ = 'eperez'
 
@@ -52,7 +54,7 @@ class PhoneSchema(EduidSchema, CSRFRequestMixin):
     primary = fields.Boolean(attribute='primary')
 
     @pre_load
-    def normalize_phone_number(self, in_data):
+    def normalize_phone_number(self, in_data, **kwargs):
         if in_data.get('number'):
             in_data['number'] = normalize_to_e_164(in_data['number'])
         return in_data

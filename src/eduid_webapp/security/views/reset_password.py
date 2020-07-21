@@ -5,20 +5,35 @@ from __future__ import absolute_import
 import json
 from functools import wraps
 
-from eduid_common.api.exceptions import MailTaskFailed, MsgTaskFailed
-from flask import Blueprint, request, render_template, url_for, redirect
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 from flask_babel import gettext as _
+from marshmallow import ValidationError
 
+from eduid_common.api.decorators import require_user
+from eduid_common.api.exceptions import MailTaskFailed, MsgTaskFailed
+from eduid_common.api.helpers import check_magic_cookie
 from eduid_common.session import session
-from eduid_userdb.security.state import PasswordResetEmailState, PasswordResetEmailAndPhoneState
 from eduid_userdb.exceptions import DocumentDoesNotExist
-from eduid_webapp.security.schemas import ResetPasswordEmailSchema, ResetPasswordExtraSecuritySchema
-from eduid_webapp.security.schemas import ResetPasswordVerifyPhoneNumberSchema, ResetPasswordNewPasswordSchema
-from eduid_webapp.security.helpers import send_password_reset_mail, get_extra_security_alternatives, mask_alternatives
-from eduid_webapp.security.helpers import send_verify_phone_code, verify_email_address, verify_phone_number
-from eduid_webapp.security.helpers import generate_suggested_password, get_zxcvbn_terms, reset_user_password
-from eduid_webapp.security.app import current_security_app as current_app
+from eduid_userdb.security.state import PasswordResetEmailAndPhoneState, PasswordResetEmailState
 
+from eduid_webapp.security.app import current_security_app as current_app
+from eduid_webapp.security.helpers import (
+    generate_suggested_password,
+    get_extra_security_alternatives,
+    get_zxcvbn_terms,
+    mask_alternatives,
+    reset_user_password,
+    send_password_reset_mail,
+    send_verify_phone_code,
+    verify_email_address,
+    verify_phone_number,
+)
+from eduid_webapp.security.schemas import (
+    ResetPasswordEmailSchema,
+    ResetPasswordExtraSecuritySchema,
+    ResetPasswordNewPasswordSchema,
+    ResetPasswordVerifyPhoneNumberSchema,
+)
 
 __author__ = 'lundberg'
 
@@ -59,8 +74,9 @@ def require_state(f):
             current_app.logger.info('Phone code expired for state: {}'.format(email_code))
             # Revert the state to EmailState to allow the user to choose extra security again
             current_app.password_reset_state_db.remove_state(state)
-            state = PasswordResetEmailState(eppn=state.eppn, email_address=state.email_address,
-                                            email_code=state.email_code)
+            state = PasswordResetEmailState(
+                eppn=state.eppn, email_address=state.email_address, email_code=state.email_code
+            )
             current_app.password_reset_state_db.save(state)
             view_context = {
                 'heading': _('SMS code expired'),
@@ -72,6 +88,7 @@ def require_state(f):
 
         kwargs['state'] = state
         return f(*args, **kwargs)
+
     return require_state_decorator
 
 
@@ -88,23 +105,28 @@ def reset_password():
         'errors': [],
     }
     if request.method == 'POST':
-        form = ResetPasswordEmailSchema().load(request.form)
-        if not form.errors and session.get_csrf_token() == form.data['csrf']:
-            current_app.logger.info('Trying to send password reset email to {}'.format(form.data['email']))
-            try:
-                send_password_reset_mail(form.data['email'])
-            except MailTaskFailed as e:
-                current_app.logger.error('Sending e-mail failed: {}'.format(e))
-                view_context = {
-                    'heading': _('Temporary technical problem'),
-                    'text': _('Please try again.'),
-                    'retry_url': url_for('reset_password.reset_password'),
-                    'retry_url_txt': _('Try again'),
-                }
-                return render_template('error.jinja2', view_context=view_context)
-            view_context['form_post_success'] = True
-            view_context['text'] = ''
-        view_context['errors'] = form.errors
+        try:
+            form = ResetPasswordEmailSchema().load(request.form)
+        except ValidationError as e:
+            current_app.logger.error(e)
+            view_context['errors'] = e.messages
+        else:
+            if session.get_csrf_token() == form['csrf']:
+                current_app.logger.info('Trying to send password reset email to {}'.format(form['email']))
+                try:
+                    send_password_reset_mail(form['email'])
+                except MailTaskFailed as e:
+                    current_app.logger.error('Sending e-mail failed: {}'.format(e))
+                    view_context = {
+                        'heading': _('Temporary technical problem'),
+                        'text': _('Please try again.'),
+                        'retry_url': url_for('reset_password.reset_password'),
+                        'retry_url_txt': _('Try again'),
+                    }
+                    return render_template('error.jinja2', view_context=view_context)
+                view_context['form_post_success'] = True
+                view_context['text'] = ''
+
     view_context['csrf_token'] = session.new_csrf_token()
     return render_template('reset_password.jinja2', view_context=view_context)
 
@@ -117,7 +139,7 @@ def email_reset_code(state):
         current_app.logger.info('Redirecting user to extra security view')
         return redirect(url_for('reset_password.choose_extra_security', email_code=state.email_code.code))
 
-    current_app.logger.info('Could not validated email code for {}'.format(state.eppn))
+    current_app.logger.info('Could not validate email code for {}'.format(state.eppn))
     view_context = {
         'heading': _('Temporary technical problem'),
         'text': _('Please try again.'),
@@ -150,32 +172,40 @@ def choose_extra_security(state):
         return render_template('error.jinja2', view_context=view_context)
 
     if request.method == 'POST':
-        form = ResetPasswordExtraSecuritySchema().load(request.form)
-        if not form.errors and session.get_csrf_token() == form.data['csrf']:
-            if form.data.get('no_extra_security'):
-                current_app.logger.info('Redirecting user to reset password with NO extra security')
-                current_app.stats.count(name='reset_password_no_extra_security')
-                return redirect(url_for('reset_password.new_password', email_code=state.email_code.code))
-            if form.data.get('phone_number_index'):
-                phone_number_index = int(form.data.get('phone_number_index'))
-                phone_number = state.extra_security['phone_numbers'][phone_number_index]
-                current_app.logger.info('Trying to send password reset sms to user {}'.format(state.eppn))
-                try:
-                    send_verify_phone_code(state, phone_number)
-                except MsgTaskFailed as e:
-                    current_app.logger.error('Sending sms failed: {}'.format(e))
-                    view_context = {
-                        'heading': _('Temporary technical problem'),
-                        'text': _('Please try again.'),
-                        'retry_url': url_for('reset_password.choose_extra_security', email_code=state.email_code.code),
-                        'retry_url_txt': _('Try again'),
-                    }
-                    return render_template('error.jinja2', view_context=view_context)
-                current_app.logger.info('Redirecting user to verify phone number view')
-                current_app.stats.count(name='reset_password_extra_security_phone')
-                return redirect(url_for('reset_password.extra_security_phone_number', email_code=state.email_code.code))
+        try:
+            form = ResetPasswordExtraSecuritySchema().load(request.form)
+        except ValidationError as e:
+            current_app.logger.error(e)
+            view_context['errors'] = e.messages
+        else:
+            if session.get_csrf_token() == form['csrf']:
+                if form.get('no_extra_security'):
+                    current_app.logger.info('Redirecting user to reset password with NO extra security')
+                    current_app.stats.count(name='reset_password_no_extra_security')
+                    return redirect(url_for('reset_password.new_password', email_code=state.email_code.code))
+                if form.get('phone_number_index'):
+                    phone_number_index = int(form.get('phone_number_index'))
+                    phone_number = state.extra_security['phone_numbers'][phone_number_index]
+                    current_app.logger.info('Trying to send password reset sms to user {}'.format(state.eppn))
+                    try:
+                        send_verify_phone_code(state, phone_number)
+                    except MsgTaskFailed as e:
+                        current_app.logger.error('Sending sms failed: {}'.format(e))
+                        view_context = {
+                            'heading': _('Temporary technical problem'),
+                            'text': _('Please try again.'),
+                            'retry_url': url_for(
+                                'reset_password.choose_extra_security', email_code=state.email_code.code
+                            ),
+                            'retry_url_txt': _('Try again'),
+                        }
+                        return render_template('error.jinja2', view_context=view_context)
+                    current_app.logger.info('Redirecting user to verify phone number view')
+                    current_app.stats.count(name='reset_password_extra_security_phone')
+                    return redirect(
+                        url_for('reset_password.extra_security_phone_number', email_code=state.email_code.code)
+                    )
 
-        view_context['errors'] = form.errors
     view_context['csrf_token'] = session.new_csrf_token()
 
     try:
@@ -213,24 +243,33 @@ def extra_security_phone_number(state):
         'errors': [],
     }
     if request.method == 'POST':
-        form = ResetPasswordVerifyPhoneNumberSchema().load(request.form)
-        if not form.errors and session.get_csrf_token() == form.data['csrf']:
-            current_app.logger.info('Trying to verify phone code')
-            if form.data.get('phone_code', '') == state.phone_code.code:
-                if not verify_phone_number(state):
-                    current_app.logger.info('Could not validated phone code for {}'.format(state.eppn))
-                    view_context = {
-                        'heading': _('Temporary technical problem'),
-                        'text': _('Please try again.'),
-                        'retry_url': url_for('reset_password.choose_extra_security', email_code=state.email_code.code),
-                        'retry_url_txt': _('Try again'),
-                    }
-                    return render_template('error.jinja2', view_context=view_context)
-                current_app.logger.info('Phone code verified redirecting user to set password view')
-                current_app.stats.count(name='reset_password_extra_security_phone_success')
-                return redirect(url_for('reset_password.new_password', email_code=state.email_code.code))
-            view_context['form_post_fail_msg'] = _('Invalid code. Please try again.')
-        view_context['errors'] = form.errors
+        try:
+            form = ResetPasswordVerifyPhoneNumberSchema().load(request.form)
+        except ValidationError as e:
+            current_app.logger.error(e)
+            view_context['errors'] = e.messages
+        else:
+            if session.get_csrf_token() == form['csrf']:
+                current_app.logger.info('Trying to verify phone code')
+
+                phone_code = form.get('phone_code', '')
+
+                if phone_code == state.phone_code.code:
+                    if not verify_phone_number(state):
+                        current_app.logger.info('Could not validated phone code for {}'.format(state.eppn))
+                        view_context = {
+                            'heading': _('Temporary technical problem'),
+                            'text': _('Please try again.'),
+                            'retry_url': url_for(
+                                'reset_password.choose_extra_security', email_code=state.email_code.code
+                            ),
+                            'retry_url_txt': _('Try again'),
+                        }
+                        return render_template('error.jinja2', view_context=view_context)
+                    current_app.logger.info('Phone code verified redirecting user to set password view')
+                    current_app.stats.count(name='reset_password_extra_security_phone_success')
+                    return redirect(url_for('reset_password.new_password', email_code=state.email_code.code))
+                view_context['form_post_fail_msg'] = _('Invalid code. Please try again.')
     view_context['csrf_token'] = session.new_csrf_token()
     return render_template('reset_password_verify_phone.jinja2', view_context=view_context)
 
@@ -241,11 +280,13 @@ def new_password(state):
     current_app.logger.info('Password reset: new_password {}'.format(request.method))
     view_context = {
         'heading': _('New password'),
-        'text': _('''
+        'text': _(
+            '''
             Please choose a new password for your eduID account. A strong password has been generated for you.
             You can accept the generated password by clicking "Change password" or you can opt to choose your
             own password by clicking "Custom Password".
-        '''),
+        '''
+        ),
         'action': url_for('reset_password.new_password', email_code=state.email_code.code),
         'csrf_token': session.get_csrf_token(),
         'active_pane': 'generated',
@@ -254,28 +295,32 @@ def new_password(state):
     }
     if request.method == 'POST':
         min_entropy = current_app.config.password_entropy
-        form = ResetPasswordNewPasswordSchema(
-            zxcvbn_terms=view_context['zxcvbn_terms'], min_entropy=int(min_entropy)).load(request.form)
-        current_app.logger.debug(form)
-        if not form.errors and session.get_csrf_token() == form.data['csrf']:
-            if form.data.get('use_generated_password'):
-                password = state.generated_password
-                current_app.logger.info('Generated password used')
-                current_app.stats.count(name='reset_password_generated_password_used')
-            else:
-                password = form.data.get('custom_password')
-                current_app.logger.info('Custom password used')
-                current_app.stats.count(name='reset_password_custom_password_used')
-            current_app.logger.info('Resetting password for user {}'.format(state.eppn))
-            reset_user_password(state, password)
-            current_app.logger.info('Password reset done removing state for user {}'.format(state.eppn))
-            current_app.password_reset_state_db.remove_state(state)
-            view_context['form_post_success'] = True
-            view_context['login_url'] = current_app.config.eduid_site_url
-            return render_template('reset_password_new_password.jinja2', view_context=view_context)
-
-        view_context['errors'] = form.errors
-        view_context['active_pane'] = 'custom'
+        try:
+            form = ResetPasswordNewPasswordSchema(
+                zxcvbn_terms=view_context['zxcvbn_terms'], min_entropy=int(min_entropy)
+            ).load(request.form)
+            current_app.logger.debug(form)
+        except ValidationError as e:
+            current_app.logger.error(e)
+            view_context['errors'] = e.messages
+            view_context['active_pane'] = 'custom'
+        else:
+            if session.get_csrf_token() == form['csrf']:
+                if form.get('use_generated_password'):
+                    password = state.generated_password
+                    current_app.logger.info('Generated password used')
+                    current_app.stats.count(name='reset_password_generated_password_used')
+                else:
+                    password = form.get('custom_password')
+                    current_app.logger.info('Custom password used')
+                    current_app.stats.count(name='reset_password_custom_password_used')
+                current_app.logger.info('Resetting password for user {}'.format(state.eppn))
+                reset_user_password(state, password)
+                current_app.logger.info('Password reset done removing state for user {}'.format(state.eppn))
+                current_app.password_reset_state_db.remove_state(state)
+                view_context['form_post_success'] = True
+                view_context['login_url'] = current_app.config.eduid_site_url
+                return render_template('reset_password_new_password.jinja2', view_context=view_context)
 
     # Generate a random good password
     # TODO: Hash the password using VCCSPasswordFactor before saving it to db
@@ -285,3 +330,39 @@ def new_password(state):
 
     view_context['csrf_token'] = session.new_csrf_token()
     return render_template('reset_password_new_password.jinja2', view_context=view_context)
+
+
+@reset_password_views.route('/get-email-code', methods=['GET'])
+def get_email_code():
+    """
+    Backdoor to get the email verification code in the staging or dev environments
+    """
+    try:
+        if check_magic_cookie(current_app.config):
+            eppn = request.args.get('eppn')
+            state = current_app.password_reset_state_db.get_state_by_eppn(eppn)
+            return state.email_code.code
+    except Exception:
+        current_app.logger.exception(
+            "Someone tried to use the backdoor to get the email verification code for a password reset"
+        )
+
+    abort(400)
+
+
+@reset_password_views.route('/get-phone-code', methods=['GET'])
+def get_phone_code():
+    """
+    Backdoor to get the phone verification code in the staging or dev environments
+    """
+    try:
+        if check_magic_cookie(current_app.config):
+            eppn = request.args.get('eppn')
+            state = current_app.password_reset_state_db.get_state_by_eppn(eppn)
+            return state.phone_code.code
+    except Exception:
+        current_app.logger.exception(
+            "Someone tried to use the backdoor to get the SMS verification code for a password reset"
+        )
+
+    abort(400)

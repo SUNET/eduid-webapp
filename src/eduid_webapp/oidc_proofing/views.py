@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import six
 import base64
 import binascii
 
-import requests
 import qrcode
 import qrcode.image.svg
+import requests
+from flask import Blueprint, make_response, request, url_for
 from jose import jws as jose
-from flask import request, make_response, url_for
-from flask import Blueprint
-from oic.oic.message import AuthorizationResponse, ClaimsRequest, Claims
+from oic.oic.message import AuthorizationResponse, Claims, ClaimsRequest
+from six import BytesIO
 
+from eduid_common.api.decorators import MarshalWith, UnmarshalWith, can_verify_identity, require_user
+from eduid_common.api.exceptions import TaskFailed
+from eduid_common.api.helpers import add_nin_to_user
+from eduid_common.api.messages import CommonMsg, error_response
+from eduid_userdb.exceptions import DocumentDoesNotExist
 from eduid_userdb.proofing import ProofingUser
 from eduid_userdb.util import UTC
-from eduid_userdb.exceptions import DocumentDoesNotExist
-from six import BytesIO
-from eduid_common.api.decorators import require_user, can_verify_identity, MarshalWith, UnmarshalWith
-from eduid_common.api.helpers import add_nin_to_user
-from eduid_common.api.exceptions import TaskFailed
-from eduid_webapp.oidc_proofing import schemas
-from eduid_webapp.oidc_proofing import helpers
+
+from eduid_webapp.oidc_proofing import helpers, schemas
 from eduid_webapp.oidc_proofing.app import current_oidcp_app as current_app
+from eduid_webapp.oidc_proofing.helpers import OIDCMsg
 
 __author__ = 'lundberg'
 
@@ -38,14 +38,15 @@ def authorization_response():
     # parse authentication response
     query_string = request.query_string.decode('utf-8')
     current_app.logger.debug('query_string: {!s}'.format(query_string))
-    authn_resp = current_app.oidc_client.parse_response(AuthorizationResponse, info=query_string,
-                                                        sformat='urlencoded')
+    authn_resp = current_app.oidc_client.parse_response(AuthorizationResponse, info=query_string, sformat='urlencoded')
     current_app.logger.debug('Authorization response received: {!s}'.format(authn_resp))
 
     if authn_resp.get('error'):
-        current_app.logger.error('AuthorizationError from {}: {} - {} ({})'.format(request.host, authn_resp['error'],
-                                                                                   authn_resp.get('error_message'),
-                                                                                   authn_resp.get('error_uri')))
+        current_app.logger.error(
+            'AuthorizationError from {}: {} - {} ({})'.format(
+                request.host, authn_resp['error'], authn_resp.get('error_message'), authn_resp.get('error_uri')
+            )
+        )
         current_app.stats.count(name='authn_response_op_error')
         return make_response('OK', 200)
 
@@ -56,28 +57,27 @@ def authorization_response():
         current_app.logger.error(msg)
         current_app.stats.count(name='authn_response_proofing_state_missing')
         return make_response('OK', 200)
-    current_app.logger.debug('Proofing state {!s} for user {!s} found'.format(proofing_state.state,
-                                                                              proofing_state.eppn))
+    current_app.logger.debug(
+        'Proofing state {!s} for user {!s} found'.format(proofing_state.state, proofing_state.eppn)
+    )
 
     # Check if the token from the authn response matches the token we created when making the auth request
     authorization_header = request.headers.get('Authorization')
     if authorization_header != 'Bearer {}'.format(proofing_state.token):
-        current_app.logger.error('The authorization token ({!s}) did not match the expected'.format(
-            authorization_header))
+        current_app.logger.error(
+            'The authorization token ({!s}) did not match the expected'.format(authorization_header)
+        )
         current_app.stats.count(name='authn_response_authn_failure')
         return make_response('FORBIDDEN', 403)
 
     # TODO: We should save the auth response code to the proofing state to be able to continue a failed attempt
     # do token request
-    args = {
-        'code': authn_resp['code'],
-        'redirect_uri': url_for('oidc_proofing.authorization_response', _external=True)
-    }
+    args = {'code': authn_resp['code'], 'redirect_uri': url_for('oidc_proofing.authorization_response', _external=True)}
     current_app.logger.debug('Trying to do token request: {!s}'.format(args))
     # TODO: What should be saved from the token response and where?
-    token_resp = current_app.oidc_client.do_access_token_request(scope='openid', state=authn_resp['state'],
-                                                                 request_args=args,
-                                                                 authn_method='client_secret_basic')
+    token_resp = current_app.oidc_client.do_access_token_request(
+        scope='openid', state=authn_resp['state'], request_args=args, authn_method='client_secret_basic'
+    )
     current_app.logger.debug('token response received: {!s}'.format(token_resp))
     id_token = token_resp['id_token']
     if id_token['nonce'] != proofing_state.nonce:
@@ -89,12 +89,14 @@ def authorization_response():
     # do userinfo request
     current_app.logger.debug('Trying to do userinfo request:')
     # TODO: Do we need to save anything else from the userinfo response
-    userinfo = current_app.oidc_client.do_user_info_request(method=current_app.config.userinfo_endpoint_method,
-                                                            state=authn_resp['state'])
+    userinfo = current_app.oidc_client.do_user_info_request(
+        method=current_app.config.userinfo_endpoint_method, state=authn_resp['state']
+    )
     current_app.logger.debug('userinfo received: {!s}'.format(userinfo))
     if userinfo['sub'] != id_token['sub']:
-        current_app.logger.error('The \'sub\' of userinfo does not match \'sub\' of ID Token for user {!s}.'.format(
-            proofing_state.eppn))
+        current_app.logger.error(
+            'The \'sub\' of userinfo does not match \'sub\' of ID Token for user {!s}.'.format(proofing_state.eppn)
+        )
         current_app.stats.count(name='authn_response_userinfo_request_failure')
         return make_response('OK', 200)
     current_app.stats.count(name='authn_response_userinfo_request_success')
@@ -102,7 +104,7 @@ def authorization_response():
     # TODO: Break out in parts to be able to continue the proofing process after a successful authorization response
     # TODO: even if the token request, userinfo request or something internal fails
     am_user = current_app.central_userdb.get_user_by_eppn(proofing_state.eppn)
-    user = ProofingUser(data=am_user.to_dict())
+    user = ProofingUser.from_user(am_user, current_app.private_userdb)
 
     try:
         # Handle userinfo differently depending on data in userinfo
@@ -169,10 +171,10 @@ def seleg_proofing(user, nin):
             success = helpers.do_authn_request(proofing_state, claims_request, redirect_url)
             if not success:
                 current_app.stats.count(name='seleg.authn_request_op_error')
-                return {'_status': 'error', 'message': 'Temporary technical problems'}
+                return error_response(message=CommonMsg.temp_problem)
         except requests.exceptions.ConnectionError as e:
             current_app.logger.error('No connection to authorization endpoint: {!s}'.format(e))
-            return {'_status': 'error', 'message': 'No connection to authorization endpoint'}
+            return error_response(message=OIDCMsg.no_conn)
 
         # If authentication request went well save user state
         current_app.stats.count(name='seleg.authn_request_success')
@@ -208,7 +210,7 @@ def get_freja_state(user):
         "iarp": current_app.config.freja_iarp,
         "exp": int(valid_until.astimezone(UTC()).strftime('%s')) * 1000,  # Milliseconds since 1970 in UTC
         "proto": current_app.config.freja_response_protocol,
-        "opaque": opaque_data
+        "opaque": opaque_data,
     }
 
     jwk = binascii.unhexlify(current_app.config.freja_jwk_secret)
@@ -217,9 +219,7 @@ def get_freja_state(user):
         'kid': current_app.config.freja_jws_key_id,
     }
     jws = jose.sign(request_data, jwk, headers=jws_header, algorithm=current_app.config.freja_jws_algorithm)
-    return {
-        'iaRequestData': jws
-    }
+    return {'iaRequestData': jws}
 
 
 @oidc_proofing_views.route('/freja/proofing', methods=['POST'])
@@ -240,10 +240,10 @@ def freja_proofing(user, nin):
             success = helpers.do_authn_request(proofing_state, claims_request, redirect_url)
             if not success:
                 current_app.stats.count(name='freja.authn_request_op_error')
-                return {'_status': 'error', 'message': 'Temporary technical problems'}
+                return error_response(message=CommonMsg.temp_problem)
         except requests.exceptions.ConnectionError as e:
             current_app.logger.error('No connection to authorization endpoint: {!s}'.format(e))
-            return {'_status': 'error', 'message': 'No connection to authorization endpoint'}
+            return error_response(message=OIDCMsg.no_conn)
 
         # If authentication request went well save user state
         current_app.stats.count(name='freja.authn_request_success')

@@ -32,14 +32,16 @@
 from __future__ import absolute_import
 
 from time import time
-from saml2.ident import code
-from flask import request, redirect
 
-from eduid_common.session import session
+from flask import redirect, request
+from saml2.ident import code
+
 from eduid_common.api.utils import verify_relay_state
-from eduid_common.authn.loa import get_loa
 from eduid_common.authn.acs_registry import acs_action
+from eduid_common.authn.loa import get_loa
 from eduid_common.authn.utils import get_saml_attribute
+from eduid_common.session import session
+
 from eduid_webapp.authn.app import current_authn_app as current_app
 
 
@@ -85,7 +87,7 @@ def login_action(session_info, user):
     relay_state = verify_relay_state(request.form.get('RelayState', '/'))
     current_app.logger.debug('Redirecting to the RelayState: ' + relay_state)
     response = redirect(location=relay_state)
-    #session.set_cookie(response)  #XXX: Is the explicit set_cookie needed?
+    # session.set_cookie(response)  #XXX: Is the explicit set_cookie needed?
     current_app.logger.info('Redirecting user {} to {!r}'.format(user, relay_state))
     return response
 

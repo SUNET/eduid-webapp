@@ -1,24 +1,56 @@
 # -*- coding: utf-8 -*-
 
 from datetime import datetime, timedelta
+from enum import unique
+from xml.etree.ElementTree import ParseError
+
 from dateutil.parser import parse as dt_parse
 from dateutil.tz import tzutc
-from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
-from flask import current_app, redirect
-from werkzeug.wrappers import Response as WerkzeugResponse
-from xml.etree.ElementTree import ParseError
-from saml2 import BINDING_HTTP_REDIRECT, BINDING_HTTP_POST
-from saml2.metadata import entity_descriptor
+from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
 from saml2.client import Saml2Client
+from saml2.metadata import entity_descriptor
 from saml2.response import SAMLError
 from saml2.saml import AuthnContextClassRef
 from saml2.samlp import RequestedAuthnContext
 
-from eduid_common.session import session
-from eduid_common.authn.cache import OutstandingQueriesCache, IdentityCache
+from eduid_common.api.messages import TranslatableMsg
+from eduid_common.authn.cache import IdentityCache, OutstandingQueriesCache
 from eduid_common.authn.eduid_saml2 import BadSAMLResponse, get_authn_ctx
+from eduid_common.session import session
+
+from eduid_webapp.eidas.app import current_eidas_app as current_app
 
 __author__ = 'lundberg'
+
+
+@unique
+class EidasMsg(TranslatableMsg):
+    """
+    Messages sent to the front end with information on the results of the
+    attempted operations on the back end.
+    """
+
+    # LOA 3 not needed
+    authn_context_mismatch = 'eidas.authn_context_mismatch'
+    # re-authentication expired
+    reauthn_expired = 'eidas.reauthn_expired'
+    # the token was not used to authenticate this session
+    token_not_in_creds = 'eidas.token_not_in_credentials_used'
+    # the personalIdentityNumber from eidas does not correspond
+    # to a verified nin in the user's account
+    nin_not_matching = 'eidas.nin_not_matching'
+    # successfully verified the token
+    verify_success = 'eidas.token_verify_success'
+    # The user already has a verified NIN
+    nin_already_verified = 'eidas.nin_already_verified'
+    # Successfully verified the NIN
+    nin_verify_success = 'eidas.nin_verify_success'
+    # missing redirect URL for mfa authn
+    no_redirect_url = 'eidas.no_redirect_url'
+    # Action completed, redirect to actions app
+    action_completed = 'actions.action-completed'
+    # Token not found on the credentials in the user's account
+    token_not_found = 'eidas.token_not_found'
 
 
 def create_authn_request(relay_state, selected_idp, required_loa, force_authn=False):
@@ -30,8 +62,9 @@ def create_authn_request(relay_state, selected_idp, required_loa, force_authn=Fa
     # LOA
     current_app.logger.debug('Requesting AuthnContext {}'.format(required_loa))
     loa_uri = current_app.config.authentication_context_map[required_loa]
-    requested_authn_context = RequestedAuthnContext(authn_context_class_ref=AuthnContextClassRef(text=loa_uri),
-                                                    comparison='exact')
+    requested_authn_context = RequestedAuthnContext(
+        authn_context_class_ref=AuthnContextClassRef(text=loa_uri), comparison='exact'
+    )
     kwargs['requested_authn_context'] = requested_authn_context
 
     # Authn algorithms
@@ -40,8 +73,9 @@ def create_authn_request(relay_state, selected_idp, required_loa, force_authn=Fa
 
     client = Saml2Client(current_app.saml2_config)
     try:
-        session_id, info = client.prepare_for_authenticate(entityid=selected_idp, relay_state=relay_state,
-                                                           binding=BINDING_HTTP_REDIRECT, **kwargs)
+        session_id, info = client.prepare_for_authenticate(
+            entityid=selected_idp, relay_state=relay_state, binding=BINDING_HTTP_REDIRECT, **kwargs
+        )
     except TypeError:
         current_app.logger.error('Unable to know which IdP to use')
         raise
@@ -70,8 +104,7 @@ def parse_authn_response(saml_response):
 
     if response is None:
         current_app.logger.error('SAML response is None')
-        raise BadSAMLResponse(
-            "SAML response has errors. Please check the logs")
+        raise BadSAMLResponse("SAML response has errors. Please check the logs")
 
     session_id = response.session_id()
     oq_cache.delete(session_id)
@@ -109,19 +142,6 @@ def is_valid_reauthn(session_info, max_age=60) -> bool:
 
 def create_metadata(config):
     return entity_descriptor(config)
-
-
-def redirect_with_msg(url: str, msg: str) -> WerkzeugResponse:
-    """
-    :param url: URL to redirect to
-    :param msg: message to append to query string
-    :return: Redirect response with appended query string message
-    """
-    scheme, netloc, path, query_string, fragment = urlsplit(url)
-    query_list = parse_qsl(query_string)
-    query_list.append(('msg', msg))
-    new_query_string = urlencode(query_list)
-    return redirect(urlunsplit((scheme, netloc, path, new_query_string, fragment)))
 
 
 def staging_nin_remap(session_info):

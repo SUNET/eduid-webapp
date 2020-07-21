@@ -32,10 +32,9 @@
 #
 
 from marshmallow import fields
-from eduid_common.api.schemas.base import EduidSchema
-from eduid_common.api.schemas.base import FluxStandardAction
-from eduid_common.api.schemas.csrf import CSRFRequestMixin
-from eduid_common.api.schemas.csrf import CSRFResponseMixin
+
+from eduid_common.api.schemas.base import EduidSchema, FluxStandardAction
+from eduid_common.api.schemas.csrf import CSRFRequestMixin, CSRFResponseMixin
 from eduid_common.api.schemas.validators import validate_email
 
 __author__ = 'eperez'
@@ -44,6 +43,7 @@ __author__ = 'eperez'
 class EmailSchema(EduidSchema, CSRFRequestMixin):
 
     email = fields.Email(required=True, validate=[validate_email])
+
 
 class RegisterEmailSchema(EmailSchema):
 

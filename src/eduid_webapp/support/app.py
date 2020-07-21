@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -33,29 +33,32 @@
 
 from __future__ import absolute_import
 
-from typing import cast
 import operator
+from typing import cast
 
 from flask import current_app
 from jinja2.exceptions import UndefinedError
 
-from eduid_common.api.app import get_app_config
 from eduid_common.api.utils import urlappend
 from eduid_common.authn.middleware import AuthnBaseApp
 from eduid_userdb.support import db
+
 from eduid_webapp.support.settings.common import SupportConfig
 
 
 class SupportApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(SupportApp, self).__init__(name, SupportConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = SupportConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: SupportConfig = cast(SupportConfig, self.config)  # type: ignore
 
         if self.config.token_service_url_logout is None:
             self.config.token_service_url_logout = urlappend(self.config.token_service_url, 'logout')
 
         from eduid_webapp.support.views import support_views
+
         self.register_blueprint(support_views)
 
         self.support_user_db = db.SupportUserDB(self.config.mongo_uri)
@@ -68,14 +71,13 @@ class SupportApp(AuthnBaseApp):
         self.support_email_proofing_db = db.SupportEmailProofingDB(self.config.mongo_uri)
         self.support_phone_proofing_db = db.SupportPhoneProofingDB(self.config.mongo_uri)
 
-        self = register_template_funcs(self)
+        register_template_funcs(self)
 
 
 current_support_app: SupportApp = cast(SupportApp, current_app)
 
 
-def register_template_funcs(app):
-
+def register_template_funcs(app: SupportApp) -> None:
     @app.template_filter('datetimeformat')
     def datetimeformat(value, format='%Y-%m-%d %H:%M %Z'):
         if not value:
@@ -99,7 +101,7 @@ def register_template_funcs(app):
             l = list()
         return l
 
-    return app
+    return None
 
 
 def support_init_app(name: str, config: dict) -> SupportApp:

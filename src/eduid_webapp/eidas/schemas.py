@@ -2,9 +2,8 @@
 
 from marshmallow import fields
 
-from eduid_common.api.schemas.base import EduidSchema, FluxStandardAction
-from eduid_common.api.schemas.csrf import CSRFResponseMixin, CSRFRequestMixin
-from eduid_common.api.schemas.validators import validate_nin
+from eduid_common.api.schemas.base import EduidSchema
+from eduid_common.api.schemas.csrf import CSRFRequestMixin, CSRFResponseMixin
 
 __author__ = 'lundberg'
 

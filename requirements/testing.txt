@@ -7,7 +7,11 @@
 -r actions.txt
 -r eidas.txt
 -r saml_idp.txt
+-r group_management.txt
 WebTest>==2.0.30
 mock>=2.0.0
 pytest>=5.2.0
 pytest-cov>=2.7.1
+isort
+black
+mypy

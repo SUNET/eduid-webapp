@@ -2,48 +2,57 @@
 
 from __future__ import absolute_import
 
-from typing import cast, Optional, Dict
+from typing import cast
 
 from flask import current_app
 
-from eduid_common.authn.utils import get_saml2_config, no_authn_views
-from eduid_common.api.app import get_app_config
 from eduid_common.api import am, msg
 from eduid_common.authn.middleware import AuthnBaseApp
-from eduid_userdb.proofing.db import EidasProofingUserDB
+from eduid_common.authn.utils import get_saml2_config, no_authn_views
 from eduid_userdb.logs.db import ProofingLog
+from eduid_userdb.proofing.db import EidasProofingUserDB
+
 from eduid_webapp.eidas.settings.common import EidasConfig
 
 __author__ = 'lundberg'
 
 
 class EidasApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
 
         # Load acs actions on app init
         from . import acs_actions
 
-        super(EidasApp, self).__init__(name, EidasConfig, config, **kwargs)
-        self.config: EidasConfig = cast(EidasConfig, self.config)
+        # Make sure pycharm doesn't think the import above is unused and removes it
+        if acs_actions.__author__:
+            pass
+
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = EidasConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: EidasConfig = cast(EidasConfig, self.config)  # type: ignore
 
         self.saml2_config = get_saml2_config(self.config.saml2_settings_module)
-        self.config.saml2_config = self.saml2_config
 
         # Register views
         from eduid_webapp.eidas.views import eidas_views
+
         self.register_blueprint(eidas_views)
 
         # Register view path that should not be authorized
-        self = no_authn_views(self, ['/saml2-metadata', '/saml2-acs', '/mfa-authentication'])
+        no_authn_views(self, ['/saml2-metadata', '/saml2-acs', '/mfa-authentication'])
 
         # Init dbs
         self.private_userdb = EidasProofingUserDB(self.config.mongo_uri)
         self.proofing_log = ProofingLog(self.config.mongo_uri)
 
         # Init celery
-        self = am.init_relay(self, 'eduid_eidas')
-        self = msg.init_relay(self)
+        am.init_relay(self, 'eduid_eidas')
+        msg.init_relay(self)
+
+
+current_eidas_app: EidasApp = cast(EidasApp, current_app)
 
 
 def init_eidas_app(name: str, config: dict) -> EidasApp:

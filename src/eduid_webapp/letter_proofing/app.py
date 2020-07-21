@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -30,13 +30,15 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
+from typing import cast
+
 from flask import current_app
 
 from eduid_common.api import am, msg
-from eduid_common.api.app import get_app_config
 from eduid_common.authn.middleware import AuthnBaseApp
 from eduid_userdb.logs import ProofingLog
 from eduid_userdb.proofing import LetterProofingStateDB, LetterProofingUserDB
+
 from eduid_webapp.letter_proofing.ekopost import Ekopost
 from eduid_webapp.letter_proofing.settings.common import LetterProofingConfig
 
@@ -44,14 +46,16 @@ __author__ = 'lundberg'
 
 
 class LetterProofingApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(LetterProofingApp, self).__init__(name, LetterProofingConfig,
-                                                config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = LetterProofingConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: LetterProofingConfig = cast(LetterProofingConfig, self.config)  # type: ignore
 
         # Register views
         from eduid_webapp.letter_proofing.views import letter_proofing_views
+
         self.register_blueprint(letter_proofing_views)
 
         # Init dbs

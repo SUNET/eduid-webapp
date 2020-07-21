@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2016 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -34,41 +35,41 @@ from typing import cast
 
 from flask import current_app
 
-from eduid_common.api.app import get_app_config
-from eduid_common.api import msg
-from eduid_common.api import am
-from eduid_common.api import mail_relay
-from eduid_common.api import translation
+from eduid_common.api import am, mail_relay, msg, translation
 from eduid_common.authn.middleware import AuthnBaseApp
 from eduid_common.authn.utils import no_authn_views
-from eduid_userdb.security import SecurityUserDB, PasswordResetStateDB
 from eduid_userdb.authninfo import AuthnInfoDB
 from eduid_userdb.logs import ProofingLog
+from eduid_userdb.security import PasswordResetStateDB, SecurityUserDB
+
 from eduid_webapp.security.settings.common import SecurityConfig
 
 
 class SecurityApp(AuthnBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
-
-        super(SecurityApp, self).__init__(name, SecurityConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = SecurityConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: SecurityConfig = cast(SecurityConfig, self.config)  # type: ignore
 
         from eduid_webapp.security.views.security import security_views
         from eduid_webapp.security.views.u2f import u2f_views
         from eduid_webapp.security.views.webauthn import webauthn_views
         from eduid_webapp.security.views.reset_password import reset_password_views
+
         self.register_blueprint(security_views)
         self.register_blueprint(u2f_views)
         self.register_blueprint(webauthn_views)
         self.register_blueprint(reset_password_views)
 
         # Register view path that should not be authorized
-        self = no_authn_views(self, ['/reset-password.*'])
+        no_authn_views(self, ['/reset-password.*'])
 
-        self = am.init_relay(self, f'eduid_{name}')
-        self = msg.init_relay(self)
-        self = mail_relay.init_relay(self)
-        self = translation.init_babel(self)
+        am.init_relay(self, f'eduid_{name}')
+        msg.init_relay(self)
+        mail_relay.init_relay(self)
+        translation.init_babel(self)
 
         self.private_userdb = SecurityUserDB(self.config.mongo_uri)
         self.authninfo_db = AuthnInfoDB(self.config.mongo_uri)

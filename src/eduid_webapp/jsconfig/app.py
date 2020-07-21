@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2016 NORDUnet A/S
+# Copyright (c) 2020 SUNET
 # All rights reserved.
 #
 #   Redistribution and use in source and binary forms, with or
@@ -32,16 +33,15 @@
 #
 from typing import cast
 
-from flask import current_app, Flask
+from flask import current_app
 
 from eduid_common.api.app import EduIDBaseApp
-from eduid_common.api.app import get_app_config
 from eduid_common.authn.utils import no_authn_views
+
 from eduid_webapp.jsconfig.settings.common import JSConfigConfig
 
 
 class JSConfigApp(EduIDBaseApp):
-
     def __init__(self, name: str, config: dict, **kwargs):
 
         kwargs['init_central_userdb'] = False
@@ -49,20 +49,22 @@ class JSConfigApp(EduIDBaseApp):
         kwargs['static_folder'] = None
         kwargs['subdomain_matching'] = True
 
-        super(JSConfigApp, self).__init__(name, JSConfigConfig, config, **kwargs)
+        # Initialise type of self.config before any parent class sets a precedent to mypy
+        self.config = JSConfigConfig.init_config(ns='webapp', app_name=name, test_config=config)
+        super().__init__(name, **kwargs)
+        # cast self.config because sometimes mypy thinks it is a FlaskConfig after super().__init__()
+        self.config: JSConfigConfig = cast(JSConfigConfig, self.config)  # type: ignore
 
         if not self.testing:
             self.url_map.host_matching = False
 
         from eduid_webapp.jsconfig.views import jsconfig_views
+
         self.register_blueprint(jsconfig_views)
 
         # Register view path that should not be authorized
-        no_auth_paths = [
-            '/get-bundle',
-            '/signup/config'
-        ]
-        self = no_authn_views(self, no_auth_paths)
+        no_auth_paths = ['/get-bundle', '/signup/config']
+        no_authn_views(self, no_auth_paths)
 
 
 current_jsconfig_app: JSConfigApp = cast(JSConfigApp, current_app)

@@ -13,7 +13,7 @@
 #        copyright notice, this list of conditions and the following
 #        disclaimer in the documentation and/or other materials provided
 #        with the distribution.
-#     3. Neither the name of the NORDUnet nor the names of its
+#     3. Neither the name of the SUNET nor the names of its
 #        contributors may be used to endorse or promote products derived
 #        from this software without specific prior written permission.
 #
@@ -34,22 +34,30 @@ from datetime import datetime
 
 from flask import Blueprint
 
-from eduid_userdb.exceptions import UserOutOfSync
-from eduid_userdb.reset_password import ResetPasswordUser
-from eduid_common.api.decorators import require_user, MarshalWith, UnmarshalWith
+from eduid_common.api.decorators import MarshalWith, UnmarshalWith, require_user
+from eduid_common.api.messages import CommonMsg, FluxData, error_response, success_response
 from eduid_common.api.utils import save_and_sync_user
+from eduid_common.api.validation import is_valid_password
 from eduid_common.authn.vccs import change_password
 from eduid_common.session import session
-from eduid_webapp.security.schemas import CredentialList
-from eduid_webapp.reset_password.helpers import compile_credential_list
-from eduid_webapp.reset_password.helpers import generate_suggested_password
-from eduid_webapp.reset_password.helpers import hash_password, check_password
-from eduid_webapp.reset_password.helpers import ResetPwMsg
-from eduid_webapp.reset_password.schemas import ChangePasswordSchema
-from eduid_webapp.reset_password.schemas import ChpassResponseSchema
-from eduid_webapp.reset_password.schemas import SuggestedPassword, SuggestedPasswordResponseSchema
-from eduid_webapp.reset_password.helpers import error_message
+from eduid_userdb import User
+from eduid_userdb.exceptions import UserOutOfSync
+from eduid_userdb.reset_password import ResetPasswordUser
+
 from eduid_webapp.reset_password.app import current_reset_password_app as current_app
+from eduid_webapp.reset_password.helpers import (
+    ResetPwMsg,
+    check_password,
+    compile_credential_list,
+    generate_suggested_password,
+    get_zxcvbn_terms,
+    hash_password,
+)
+from eduid_webapp.reset_password.schemas import (
+    ChpassRequestSchema,
+    ChpassResponseSchema,
+    SuggestedPasswordResponseSchema,
+)
 
 change_password_views = Blueprint('change_password', __name__, url_prefix='')
 
@@ -57,40 +65,44 @@ change_password_views = Blueprint('change_password', __name__, url_prefix='')
 @change_password_views.route('/suggested-password', methods=['GET'])
 @MarshalWith(SuggestedPasswordResponseSchema)
 @require_user
-def get_suggested(user):
+def get_suggested(user) -> FluxData:
     """
-    View to get a suggested  password for the logged user.
+    View to get a suggested password for the logged user.
     """
     current_app.logger.debug(f'Sending new generated password for {user}')
     password = generate_suggested_password()
 
     session.reset_password.generated_password_hash = hash_password(password)
 
-    suggested = {
-            'suggested_password': password
-            }
-
-    return SuggestedPassword().dump(suggested).data
+    return success_response(payload={'suggested_password': password}, message=None)
 
 
 @change_password_views.route('/change-password', methods=['POST'])
 @MarshalWith(ChpassResponseSchema)
-@UnmarshalWith(ChangePasswordSchema)
+@UnmarshalWith(ChpassRequestSchema)
 @require_user
-def change_password_view(user, old_password, new_password):
+def change_password_view(user: User, old_password: str, new_password: str) -> FluxData:
     """
     View to change the password
     """
-    resetpw_user = ResetPasswordUser.from_user(user, current_app.private_userdb)
+    if not old_password or not new_password:
+        return error_response(message=ResetPwMsg.chpass_no_data)
+
+    min_entropy = current_app.config.password_entropy
+    try:
+        is_valid_password(new_password, user_info=get_zxcvbn_terms(user.eppn), min_entropy=min_entropy)
+    except ValueError:
+        return error_response(message=ResetPwMsg.chpass_weak)
+
     authn_ts = session.get('reauthn-for-chpass', None)
     if authn_ts is None:
-        return error_message(ResetPwMsg.no_reauthn)
+        return error_response(message=ResetPwMsg.no_reauthn)
 
     now = datetime.utcnow()
     delta = now - datetime.fromtimestamp(authn_ts)
     timeout = current_app.config.chpass_timeout
     if int(delta.total_seconds()) > timeout:
-        return error_message(ResetPwMsg.stale_reauthn)
+        return error_response(message=ResetPwMsg.stale_reauthn)
 
     hashed = session.reset_password.generated_password_hash
     if check_password(new_password, hashed):
@@ -100,19 +112,20 @@ def change_password_view(user, old_password, new_password):
         is_generated = False
         current_app.stats.count(name='change_password_custom_password_used')
 
+    resetpw_user = ResetPasswordUser.from_user(user, current_app.private_userdb)
+
     vccs_url = current_app.config.vccs_url
-    added = change_password(resetpw_user, new_password, old_password,
-                            'security', is_generated, vccs_url)
+    added = change_password(resetpw_user, new_password, old_password, 'reset-password', is_generated, vccs_url)
 
     if not added:
         current_app.logger.debug(f'Problem verifying the old credentials for {user}')
-        return error_message(ResetPwMsg.unrecognized_pw)
+        return error_response(message=ResetPwMsg.unrecognized_pw)
 
     resetpw_user.terminated = False
     try:
         save_and_sync_user(resetpw_user)
     except UserOutOfSync:
-        return error_message(ResetPwMsg.out_of_sync)
+        return error_response(message=CommonMsg.out_of_sync)
 
     del session['reauthn-for-chpass']
 
@@ -120,10 +133,11 @@ def change_password_view(user, old_password, new_password):
     current_app.logger.info(f'Changed password for user {resetpw_user.eppn}')
 
     next_url = current_app.config.dashboard_url
-    credentials = {
-        'next_url': next_url,
-        'credentials': compile_credential_list(resetpw_user),
-        'message': 'chpass.password-changed'
-        }
-
-    return CredentialList().dump(credentials).data
+    return success_response(
+        payload={
+            'next_url': next_url,
+            'credentials': compile_credential_list(resetpw_user),
+            'message': ResetPwMsg.chpass_password_changed,
+        },
+        message=ResetPwMsg.chpass_password_changed,
+    )

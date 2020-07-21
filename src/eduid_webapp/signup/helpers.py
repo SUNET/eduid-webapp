@@ -31,22 +31,48 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-import os
-import time
-import struct
 import datetime
-from bson import ObjectId
-import proquint
+import os
+import struct
+import time
+from enum import unique
 
+import proquint
+from bson import ObjectId
 from flask import abort
 
-from eduid_common.session import session
+from eduid_common.api.messages import FluxData, TranslatableMsg, error_response, success_response
 from eduid_common.api.utils import save_and_sync_user
-from eduid_userdb.exceptions import UserOutOfSync
+from eduid_common.session import session
 from eduid_userdb.credentials import Password
+from eduid_userdb.exceptions import UserOutOfSync
 from eduid_userdb.tou import ToUEvent
-from eduid_webapp.signup.vccs import generate_password
+
 from eduid_webapp.signup.app import current_signup_app as current_app
+from eduid_webapp.signup.vccs import generate_password
+
+
+@unique
+class SignupMsg(TranslatableMsg):
+    """
+    Messages sent to the front end with information on the results of the
+    attempted operations on the back end.
+    """
+
+    # the ToU has not been accepted
+    no_tou = 'signup.tou-not-accepted'
+    # partial success registering new account
+    reg_new = 'signup.registering-new'
+    # The email address used is already known
+    email_used = 'signup.registering-address-used'
+    # recaptcha not verified
+    no_recaptcha = 'signup.recaptcha-not-verified'
+    # verification email successfully re-sent
+    resent_success = 'signup.verification-present'
+    # unrecognized verfication code
+    unknown_code = 'signup.unknown-code'
+    # the verification code has already been verified
+    already_verified = 'signup.already-verified'
 
 
 def generate_eppn():
@@ -125,13 +151,13 @@ def remove_users_with_mail_address(email):
     # in signup_db with this (non-pending) e-mail address, it is probably left-overs from a
     # previous signup where the sync to userdb failed. Clean away all such users in signup_db
     # and continue like this was a completely new signup.
-    completed_users = signup_db.get_user_by_mail(email, raise_on_missing = False, return_list = True)
+    completed_users = signup_db.get_user_by_mail(email, raise_on_missing=False, return_list=True)
     for user in completed_users:
         current_app.logger.warning('Removing old user {} with e-mail {} from signup_db'.format(user, email))
         signup_db.remove_user_by_id(user.user_id)
 
 
-def complete_registration(signup_user):
+def complete_registration(signup_user) -> FluxData:
     """
     After a successful registration:
     * record acceptance of TOU
@@ -145,43 +171,40 @@ def complete_registration(signup_user):
     :type signup_user: SignupUser
 
     :return: registration status info
-    :rtype: dict
     """
-    current_app.logger.info("Completing registration for user "
-                    "{}".format(signup_user))
+    current_app.logger.info("Completing registration for user " "{}".format(signup_user))
 
     context = {}
     password_id = ObjectId()
     (password, salt) = generate_password(str(password_id), signup_user)
 
-    credential = Password(credential_id=password_id, salt=salt,
-                          is_generated=True, application='signup')
+    credential = Password.from_dict(dict(credential_id=password_id, salt=salt, is_generated=True, created_by='signup'))
     signup_user.passwords.add(credential)
     # Record the acceptance of the terms of use
     record_tou(signup_user, 'signup')
     try:
         save_and_sync_user(signup_user)
     except UserOutOfSync:
-        current_app.logger.error('Couldnt save user {}, '
-                                 'data out of sync'.format(signup_user))
-        return {
-            '_status': 'error',
-            'message': 'user-out-of-sync'
-        }
+        current_app.logger.error('Couldnt save user {}, ' 'data out of sync'.format(signup_user))
+        return error_response(message='user-out-of-sync')
 
     timestamp = datetime.datetime.fromtimestamp(int(time.time()))
-    session.common.eppn = signup_user.eppn
-    session.signup.ts = timestamp
-    context.update({
-        "status": 'verified',
-        "password": password,
-        "email": signup_user.mail_addresses.primary.email,
-        "dashboard_url": current_app.config.signup_authn_url
-    })
+    if session.common is not None:  # please mypy
+        session.common.eppn = signup_user.eppn
+    if session.signup is not None:  # please mypy
+        session.signup.ts = timestamp
+    context.update(
+        {
+            "status": 'verified',
+            "password": password,
+            "email": signup_user.mail_addresses.primary.email,
+            "dashboard_url": current_app.config.signup_authn_url,
+        }
+    )
 
     current_app.stats.count(name='signup_complete')
     current_app.logger.info("Signup process for new user {} complete".format(signup_user))
-    return context
+    return success_response(payload=context)
 
 
 def record_tou(user, source):
@@ -199,12 +222,10 @@ def record_tou(user, source):
     event_id = ObjectId()
     created_ts = datetime.datetime.utcnow()
     tou_version = current_app.config.tou_version
-    current_app.logger.info('Recording ToU acceptance {!r} (version {})'
-                 ' for user {} (source: {})'.format(
-                     event_id, tou_version, user, source))
-    user.tou.add(ToUEvent(
-        version = tou_version,
-        application = source,
-        created_ts = created_ts,
-        event_id = event_id
-        ))
+    current_app.logger.info(
+        'Recording ToU acceptance {!r} (version {})'
+        ' for user {} (source: {})'.format(event_id, tou_version, user, source)
+    )
+    user.tou.add(
+        ToUEvent.from_dict(dict(version=tou_version, created_by=source, created_ts=created_ts, event_id=event_id))
+    )

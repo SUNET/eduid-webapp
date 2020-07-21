@@ -34,8 +34,8 @@
 
 from __future__ import absolute_import
 
-from typing import List
 from dataclasses import dataclass, field
+from typing import List
 
 from eduid_common.config.base import FlaskConfig
 
@@ -45,6 +45,7 @@ class SecurityConfig(FlaskConfig):
     """
     Configuration for the security app
     """
+
     # timeout for phone verification token, in hours
     phone_verification_timeout: int = 24
     password_length: int = 12
@@ -62,3 +63,7 @@ class SecurityConfig(FlaskConfig):
     # password reset settings
     email_code_timeout: int = 7200  # seconds
     phone_code_timeout: int = 600  # seconds
+    # for logging out when terminating an account
+    logout_endpoint: str = '/services/authn/logout'
+    # URL to send the user to after terminating the account
+    termination_redirect_url: str = 'https://eduid.se'
