@@ -37,6 +37,8 @@ from typing import Any, Mapping, Optional, cast
 from flask import current_app
 
 from eduid_common.api import am, mail_relay, translation
+from eduid_common.api.am import AmRelay
+from eduid_common.api.mail_relay import MailRelay
 from eduid_common.authn.middleware import AuthnBaseApp
 from eduid_common.config.base import FlaskConfig
 from eduid_common.config.parsers import load_config
@@ -47,23 +49,17 @@ from eduid_webapp.email.settings.common import EmailConfig
 
 
 class EmailApp(AuthnBaseApp):
-    def __init__(self, name: str, test_config: Optional[Mapping[str, Any]], **kwargs):
-        self.conf = load_config(typ=EmailConfig, app_name=name, ns='webapp', test_config=test_config)
-        # Initialise type of self.config before any parent class sets a precedent to mypy
-        self.config = FlaskConfig.init_config(ns='webapp', app_name=name, test_config=test_config)
-        super().__init__(name, **kwargs)
+    def __init__(self, config: EmailConfig, **kwargs):
+        self.conf = config
+        super().__init__(config, **kwargs)
 
-        from eduid_webapp.email.views import email_views
-
-        self.register_blueprint(email_views)
-
-        am.init_relay(self, 'eduid_email')
-        mail_relay.init_relay(self)
+        self.am_relay = AmRelay(config.celery, 'eduid_email')
+        self.mail_relay = MailRelay(config.celery)
         translation.init_babel(self)
 
-        self.private_userdb = EmailProofingUserDB(self.config.mongo_uri)
-        self.proofing_statedb = EmailProofingStateDB(self.config.mongo_uri)
-        self.proofing_log = ProofingLog(self.config.mongo_uri)
+        self.private_userdb = EmailProofingUserDB(self.conf.mongo_uri)
+        self.proofing_statedb = EmailProofingStateDB(self.conf.mongo_uri)
+        self.proofing_log = ProofingLog(self.conf.mongo_uri)
 
 
 current_email_app: EmailApp = cast(EmailApp, current_app)
@@ -77,8 +73,14 @@ def email_init_app(name: str, test_config: Optional[Mapping[str, Any]]) -> Email
     :param test_config: Override config, used in test cases.
     """
 
-    app = EmailApp(name, test_config)
+    config = load_config(typ=EmailConfig, app_name=name, ns='webapp', test_config=test_config)
+
+    app = EmailApp(config)
 
     app.logger.info('Init {} app...'.format(name))
+
+    from eduid_webapp.email.views import email_views
+
+    app.register_blueprint(email_views)
 
     return app

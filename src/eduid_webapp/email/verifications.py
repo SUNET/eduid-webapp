@@ -89,7 +89,7 @@ def send_verification_code(email, user):
 
     current_app.mail_relay.sendmail(subject, [email], text, html, reference=state.reference)
     current_app.logger.info(
-        "Sent email address verification mail to user {}" " about address {!s}.".format(user, email)
+        f'Sent email address verification mail to user {user} about address {email}.'
     )
     return True
 
@@ -127,7 +127,7 @@ def verify_mail_address(state, proofing_user):
     if current_app.proofing_log.save(mail_address_proofing):
         save_and_sync_user(proofing_user)
         current_app.logger.info(
-            'Email address {!r} confirmed ' 'for user {}'.format(state.verification.email, proofing_user)
+            f'Email address {state.verification.email} confirmed for user {proofing_user}'
         )
         current_app.stats.count(name='email_verify_success', value=1)
         current_app.proofing_statedb.remove_state(state)

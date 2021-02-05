@@ -36,10 +36,10 @@ Configuration (file) handling for the eduID eidas app.
 """
 
 
-from eduid_common.config.base import EduIDBaseAppConfig, MagicCookieMixin
+from eduid_common.config.base import EduIDBaseAppConfig, MagicCookieMixin, CeleryConfigMixin
 
 
-class EmailConfig(EduIDBaseAppConfig, MagicCookieMixin):
+class EmailConfig(EduIDBaseAppConfig, MagicCookieMixin, CeleryConfigMixin):
     """
     Configuration for the email app
     """
