@@ -1,9 +1,8 @@
 #!/usr/bin/env python
-import os
 from pathlib import PurePath
 from typing import List
 
-from setuptools import setup, find_packages
+from setuptools import find_namespace_packages, setup
 
 version = '0.2.27'
 
@@ -37,7 +36,7 @@ setup(
     author_email='',
     description='web apps for eduID',
     classifiers=['Framework :: Flask',],
-    packages=find_packages('src'),
+    packages=find_namespace_packages(where='src'),
     package_dir={'': 'src'},
     namespace_packages=['eduid_webapp'],
     zip_safe=False,
