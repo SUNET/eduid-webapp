@@ -141,10 +141,6 @@ ecdsa==0.14.1 \
     --hash=sha256:64c613005f13efec6541bb0a33290d0d03c27abab5f15fbab20fb0ee162bdd8e \
     --hash=sha256:e108a5fe92c67639abae3260e43561af914e7fd0d27bae6d2ec1312ae7934dfe
     # via python-jose
-eduid-action==0.2.5 \
-    --hash=sha256:8823c0451227914cf437bc5758e50a3e07dbd3f75ef0d888a5826a9628d78bb3 \
-    --hash=sha256:d4923c5c97070f543646e63dcfe6d219998dcab1ab91a10f7e2d77a246bcfb67
-    # via -r requirements.in
 eduid-am==0.7.9 \
     --hash=sha256:14197e4857042eac9ae9c396c593daa900eb30f42da45a16a6366ce493c2b64b \
     --hash=sha256:a55e27209b19c8728d7876daa8dc071ee33f1460e7c8c3f41203727697f677b9
@@ -156,7 +152,6 @@ eduid-common[api,webapp,worker]==0.32.1 \
     --hash=sha256:5f07b96ca082df1f78d776b9d911159d46bb8d19f1bf39bec721a1cae8262838
     # via
     #   -r requirements.in
-    #   eduid-action
     #   eduid-am
     #   eduid-lookup-mobile
     #   eduid-msg
@@ -189,7 +184,6 @@ eduid-userdb==0.11.1 \
     --hash=sha256:8c63546314278033b1d4c2503a7a29a52d3de114aadedbaa9a565fd96c7c9bfe
     # via
     #   -r requirements.in
-    #   eduid-action
     #   eduid-am
     #   eduid-common
     #   eduid-lookup-mobile
@@ -208,7 +202,6 @@ fido2==0.6.0 \
     --hash=sha256:7541edad31967d23f5006ffeccc54536ab9934dd981d65d29620d9dfb54566bf
     # via
     #   -r requirements.in
-    #   eduid-action
     #   eduid-common
 flask-babel==2.0.0 \
     --hash=sha256:e6820a052a8d344e178cdd36dd4bb8aea09b4bda3d5f9fa9f008df2c7f2f5468 \
@@ -750,7 +743,6 @@ python-u2flib-server==5.0.1 \
     --hash=sha256:b5e1712bf8f703c6fc9bac6643efb2d57e6c9d9f0b9ab0c0df74981b2c349632
     # via
     #   -r requirements.in
-    #   eduid-action
     #   eduid-common
 pytool==3.16.1 \
     --hash=sha256:12dc85d63bd3996a363c830b9a2de3747c77d5c0851853404229cf22496fcd40 \

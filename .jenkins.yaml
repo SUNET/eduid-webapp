@@ -3,7 +3,6 @@ builders:
 upstream:
   - eduid-userdb
   - eduid-common
-  - eduid-action
 triggers:
   cron: "@weekly"
 slack:
