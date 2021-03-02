@@ -11,7 +11,7 @@ bleach>=2.1.4
 fido2==0.6.0
 flask-babel>=0.11.2
 html5lib>=1.0.1
-idna>=2.1,<2.8
+idna
 marshmallow-enum==1.5.*
 marshmallow>=3.0,==3.*
 oic>=1.2.1
@@ -39,4 +39,3 @@ pyOpenSSL>=17.3.0
 python-u2flib-server>=5.0.0
 # signup
 proquint==0.2.1
-
