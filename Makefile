@@ -28,6 +28,6 @@ compile_translations:
 	python setup.py compile_catalog --use-fuzzy
 
 %ments.txt: %ments.in
-	CUSTOM_COMPILE_COMMAND="make update_deps" $(PIPCOMPILE) < $< > $@
+	CUSTOM_COMPILE_COMMAND="make update_deps" $(PIPCOMPILE) $< > $@
 
 update_deps: $(patsubst %ments.in,%ments.txt,$(wildcard *ments.in))
