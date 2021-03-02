@@ -10,10 +10,6 @@ aiosmtplib==1.1.4 \
     --hash=sha256:8270d0a06475aa05b9276fc954fbd08a1f6c59d0452b4899413d8bca1db24541 \
     --hash=sha256:93e53edac183f1a608bc34464efeef23902e59e949017b1682014f59ecdcd37d
     # via eduid-queue
-amqp==2.6.1 \
-    --hash=sha256:70cdb10628468ff14e57ec2f751c7aa9e48e7e3651cfd62d431213c0c4e58f21 \
-    --hash=sha256:aa7f313fb887c91f15474c1229907a04dac0b8135822d6603437803424c0aa59
-    # via kombu
 arabic-reshaper==2.1.1 \
     --hash=sha256:cf318fa5d51d2d224fa49bf6bdbbb4684f6bd2c068b75cfce0e607f89ac199dc \
     --hash=sha256:dc998b15f042a5d493926a07a76807279af1e029935f0eeecb33863382c0ee7b
@@ -264,14 +260,6 @@ jinja2==2.11.3 \
     #   eduid-queue
     #   flask
     #   flask-babel
-kombu==4.5.0 \
-    --hash=sha256:389ba09e03b15b55b1a7371a441c894fd8121d174f5583bbbca032b9ea8c9edd \
-    --hash=sha256:7b92303af381ef02fad6899fd5f5a9a96031d781356cd8e505fa54ae5ddee181
-    # via
-    #   celery
-    #   eduid-am
-    #   eduid-lookup-mobile
-    #   eduid-msg
 langcodes==2.2.0 \
     --hash=sha256:29b076457744ea0c5e2e3f72241a6d97cd229e2e77489f078aba8826d7eeb0d4
     # via eduid-scimapi
