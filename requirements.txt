@@ -37,13 +37,6 @@ bleach==3.3.0 \
 blinker==1.4 \
     --hash=sha256:471aee25f3992bd325afa3772f1063dbdbbca947a041b8b89466dc00d606f8b6
     # via flask-mail
-celery[redis]==4.3.1 \
-    --hash=sha256:5a60a56bfaa264058897721e5c122e2868665edcf9f82f6c7b0a4333ba036c35 \
-    --hash=sha256:efd01061a064e1b52d5068848af6ce9beb328550a345e0c49f63427c81fad836
-    # via
-    #   eduid-am
-    #   eduid-lookup-mobile
-    #   eduid-msg
 certifi==2020.12.5 \
     --hash=sha256:1a4995114262bffbc2413b159f2a1a480c969de6e6eb13ee966d470af86af59c \
     --hash=sha256:719a74fb9e33b9bd44cc7f3a8d94bc35e4049deebe19ba7d8e108280cfd59830
