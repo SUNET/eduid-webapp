@@ -38,7 +38,6 @@ setup(
     classifiers=['Framework :: Flask',],
     packages=find_namespace_packages(where='src'),
     package_dir={'': 'src'},
-    namespace_packages=['eduid_webapp'],
     zip_safe=False,
     include_package_data=True,
     install_requires=install_requires,
