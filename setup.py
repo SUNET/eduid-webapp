@@ -4,7 +4,7 @@ from typing import List
 
 from setuptools import find_namespace_packages, setup
 
-version = '0.2.27'
+version = '0.2.28'
 
 
 def load_requirements(path: PurePath) -> List[str]:
